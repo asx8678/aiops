@@ -1,0 +1,77 @@
+{
+  "specification_version": "2.0",
+  "validation_date": "2026-09-19",
+  "status": "proposed specification; not implemented or live-tested",
+  "files": [
+    {
+      "path": "ACCEPTANCE_TESTS.md",
+      "bytes": 7898,
+      "sha256": "e4349ba3b46cc555b467e6a938650fd292e528f2e3bbeebebcdb8d16ca644fea"
+    },
+    {
+      "path": "AGENTS.md",
+      "bytes": 7003,
+      "sha256": "3ec107e80a19f9d327afd3b0016dff87ef3fc5fa49b1f2dfbf399cf2b84b68fc"
+    },
+    {
+      "path": "DETECTOR_CATALOG.md",
+      "bytes": 8409,
+      "sha256": "424185787e261bc08572d03a80c314998f3b8bce6c6030d243eb743498702e85"
+    },
+    {
+      "path": "IMPLEMENTATION_BRIEF.md",
+      "bytes": 26537,
+      "sha256": "7e927267d2032656d73a100eedc56595244823b72555275093fdd074efe0fd06"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3344,
+      "sha256": "2d133b76fb20c93a23bb4e892d4e1eaed86796b46461f1758ab2957bc7b636ca"
+    },
+    {
+      "path": "REFERENCES.md",
+      "bytes": 2923,
+      "sha256": "45ced5e94d53f34ee4cb20870deff7e1cc703d915d605c8142aece407a993361"
+    },
+    {
+      "path": "ROADMAP.md",
+      "bytes": 4308,
+      "sha256": "a4aecfff9b6bbf8841bc908a035199b1e746c3e00e8dfdb258afa6085551fc23"
+    },
+    {
+      "path": "SOURCE_ACCESS.md",
+      "bytes": 5823,
+      "sha256": "ff078a5b1bf67eb3073aa1ff6f25c9c30fa690d1c1f9405e38628ed88afd8b51"
+    },
+    {
+      "path": "START_HERE.md",
+      "bytes": 2066,
+      "sha256": "b2c3f3514bdad930dbf450d8abd8af0296b3c87c0eba8dffa64d1573e218a598"
+    },
+    {
+      "path": "tasks/000-discovery.md",
+      "bytes": 1547,
+      "sha256": "fbc2f645dbbb724bc50c7804dd0b8aada3f2bea89065264624d63b5fac48af83"
+    },
+    {
+      "path": "tasks/001-tenancy-foundation.md",
+      "bytes": 1341,
+      "sha256": "2e28387293488c7713a25ef814d76f97f226efdfadbb7e7336baf9306629bf3b"
+    },
+    {
+      "path": "tasks/002-azure-run-polling.md",
+      "bytes": 1446,
+      "sha256": "e8d48d0179b9471e82bfcbff73a18e11df7e21650ed31b56d0e7db49d456b42b"
+    },
+    {
+      "path": "tasks/003-failure-evidence.md",
+      "bytes": 1215,
+      "sha256": "545b528221f491bd0de66a4fab706c17132116881205f9c97e8436bfba9c29ef"
+    },
+    {
+      "path": "tasks/TEMPLATE.md",
+      "bytes": 1185,
+      "sha256": "eb39b57c94d3e2c734558f4d20863bb09ec0fe0d94e9162b46a8c40877b8c0de"
+    }
+  ]
+}
