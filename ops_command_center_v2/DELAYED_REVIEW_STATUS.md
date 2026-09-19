@@ -1,0 +1,38 @@
+# Delayed collector and OIDC handoffs — verified disposition
+
+Reviewed against the current tree on2026-09-19. Collector report: agent `ac056e83`, received after the completion summary. OIDC handoff: agent `06331e8b`, also delivered late. No live access/deployment/production database changes.
+
+**Outcome:** most collector findings predated fixes already in the tree. One residual defect was reproduced and fixed here: a derived ratio used collection time instead of the oldest real input timestamp. Added three regression tests and strengthened existing assertions. Final application suite: **142 passed**,0 failures; seed766324,19.5s. Production compilation/formatting/release refresh pass.
+
+## Finding-by-finding acceptance ledger
+
+- [x] **1 — Transition loss at summary byte cap.** Current `WorkloadCollection.commit` rejects summaries above100 transitions OR60,000 encoded bytes before returning a pending cursor. `TelemetryCollection.tick` persists cursor/window/evidence/occurrences inside one scoped transaction. Existing count-cap and transaction-rollback regressions pass. New `workloads_test.exs` byte-only regression uses90 transitions (below count cap), a body below transport cap, and a summary above60KB. Rejection leaves cursor revision/data, windows, evidence and occurrences exactly unchanged, releases the lease and records partial/error. A bounded retry reads the unchanged RV, saves its occurrence and advances last-success. No cursor advancement with discarded transitions was observed.
+- [x] **2 — Lossy relist after transient failures.** Watch eligibility now uses explicit `phase == watch` and an existing opaque RV, not coverage. The503 regression verifies partial coverage/error and unchanged last-success, then observes the next HTTP call using `watch=true` with the retained RV. Only expiry/unrecoverable inventory/list state or scope changes relist. Successful watches clear saved errors.
+- [x] **3 — Unexpected JSON types.** `Workloads.status` checks nil-or-map before nested traversal; `Metrics.decode` checks each row is a map. Existing `lastState:false`/`result:[1]` probes return errors. New real tick-path tests for both sources verify partial/error persistence, released leases and no false last-success; malformed initial Kubernetes state retains no resource version and stays in LIST phase.
+- [x] **4 — Ratio alignment/freshness.** `SourceConfig` and `Metrics.decode` already require integer freshness in1..3600, and paired timestamps already require <=5-second difference. Strengthened tests check strings/nil/false/float/out-of-range settings and actual HTTP ratio responses with120-second operand mismatch. New oldest-input assertion failed before the fix and passes after `lib/ops_brain/metrics.ex` uses the minimum timestamp across both operand sets. A valid pair aged30/34 seconds now emits the34-second-old timestamp, not collection time. Replay regressions also pass.
+- [x] **5 — Configuration-scope cursor reuse.** Existing fingerprint binds endpoint, namespace, approved IPs and credential reference; mismatches start fresh LIST state with a gap. Namespace-change regression passes. New endpoint-only rotation regression asserts a LIST without old RV/continuation, new approved Host authority over the pinned IP, changed fingerprint, empty old inventory and an initial-snapshot gap—not refreshed old-cluster state.
+- [x] **6 — Final deletion deltas.** Known DELETED UIDs are compared before removing inventory. Existing Pod restart deletion regression passes. Added assertions preserve an Event count3→5 delta of2, remove the object, and suppress an initial incident for an unknown/repeated deletion.
+- [x] **Immutable revisions.** Both current SQL files omit UPDATE on `observation_revisions`; the local grant file explicitly revokes it and the release grant file first revokes all table privileges. Strengthened real-DB assertion confirms `:insufficient_privilege` on runtime UPDATE, rather than accepting any PostgreSQL exception. Retention DELETE remains allowed. No schema rewrite or extra privilege is required for this follow-up.
+- [x] **OIDC handoff integration.** Migration and required SELECT/INSERT/DELETE grant were already integrated. Ordinary suite includes signed-token/HTTP fixtures plus `test/oidc/database_test.exs` uniqueness, expiry, mapped membership, disabled identities, encrypted cookies, session rotation/revocation and copied-cookie replay denial. Node-local LoginLimiter is implemented. Live IdP/browser/proxy/egress/ingress approval is still pending.
+
+## Commands actually run
+
+From `ops_brain/`, mise Elixir1.20.4/OTP27.3.4.16 with separate runtime/migration URLs for the dedicated local PostgreSQL test DB:
+
+1. `mix test test/ops_brain/preparation_test.exs`:6/7 passed; expected new timestamp assertion failed with collection time34 seconds newer than the required oldest input. Fixed production code only after reproducing it.
+2. Formatting plus `mix test test/ops_brain/workloads_test.exs test/ops_brain/preparation_test.exs test/ops_brain/replay_retention_test.exs`:28/29 passed. The new endpoint test initially expected the hostname in `conn.host`; actual transport intentionally pins the connection IP and supplies the original Host header. Corrected the test to assert both, without changing transport behavior.
+3. `mix test test/ops_brain/workloads_test.exs:372`: repaired endpoint regression passed.
+4. `mix precommit`:**142/142 passed**, including all new/strengthened collector tests and ordinary OIDC database tests.
+5. `mix format --check-formatted`, `MIX_ENV=prod mix compile --warnings-as-errors`, `MIX_ENV=prod mix release --overwrite`:passed. Refreshed `_build/prod/rel/ops_brain`; no app boot/deployment claimed.
+
+Earlier18 standalone deployment-contract tests and the synthetic restore/load probes remain recorded in `IMPLEMENTATION_STATUS.md`; they were not rerun unnecessarily for this one-line metric behavior change and additional application tests.
+
+## User-requested retry
+
+Rechecked current ratio timestamps, workload phase/scope/budget guards and both grant contracts. Re-ran `mix test test/ops_brain/workloads_test.exs test/ops_brain/preparation_test.exs test/ops_brain/replay_retention_test.exs test/oidc/database_test.exs` against the dedicated local test DB: **32 passed**,0 failures,3.8s,seed261775. Existing fixes remain present; no additional production-code changes were needed. This targeted retry is separate from the earlier142-test full-suite result.
+
+## Corrected evidence attribution and limits
+
+The earlier handoff overstated `scripts/concurrency_check.exs`: its pool4/concurrency8 run proves synthetic tenant grouping/isolation, clean scope after successful transactions and noisy/quiet source-budget independence. It does **not** test cursor atomicity, rollback, composite constraints or OIDC contention. Those have separate ordinary-suite regressions; the OIDC test launches four callers over the ordinary **pool1**, not multiple physical DB connections. `docs/OIDC.md`, `IMPLEMENTATION_STATUS.md` and `PREPARATION_STATUS.md` now state this explicitly. Multi-connection OIDC contention remains untested.
+
+Over-budget workload batches are rejected without checkpoint advancement, not buffered without limit. Repeated oversized batches can stall; operator scope/budget review is required, and eventual watch-history expiry can still force a relist with an explicit gap. This is not a claim of eternally lossless Kubernetes history. Runtime grant guarantees assume reviewed grants are applied and not widened externally. Live providers, real browser round trips, container boot and production acceptance remain separate gates; integrations stay disabled by default.

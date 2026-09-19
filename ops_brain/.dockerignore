@@ -1,0 +1,24 @@
+# Allowlist: never send local credentials, dumps, deps, build outputs or tests.
+**
+!Dockerfile
+!.dockerignore
+!mix.exs
+!mix.lock
+!config/
+!config/config.exs
+!config/prod.exs
+!config/runtime.exs
+!lib/
+!lib/**
+!priv/
+!priv/repo/
+!priv/repo/migrations/
+!priv/repo/migrations/**
+!priv/static/
+!priv/static/**
+!rel/
+!rel/container.runtime.exs
+!rel/container.prod.exs
+!rel/env.sh.eex
+!rel/overlays/
+!rel/overlays/**

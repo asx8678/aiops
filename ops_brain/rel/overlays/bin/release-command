@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+umask 077
+fail() { printf '%s\n' "$1" >&2; exit 64; }
+command=${1:-disabled}
+[ "$#" -le 1 ] || fail 'One release command required'
+case "$command" in
+  start) [ "${OPS_BRAIN_START_APPROVED:-false}" = true ] || fail 'Startup is disabled pending approval' ;;
+  migrate) [ "${OPS_BRAIN_MIGRATION_APPROVED:-false}" = true ] || fail 'Migration is disabled pending approval' ;;
+  preflight) ;;
+  *) fail 'Disabled. Explicit start, migrate or preflight required' ;;
+esac
+# Deliberately no arbitrary eval or shell command pass-through.
+[ -r "${DATABASE_URL_FILE:-}" ] || fail 'Readable database URL secret file required'
+[ -r "${SECRET_KEY_BASE_FILE:-}" ] || fail 'Readable signing secret file required'
+[ -r "${DATABASE_CA_FILE:-}" ] || fail 'Readable database CA required'
+[ -r "${OPS_BRAIN_CONFIG_FILE:-}" ] || fail 'Readable deployment JSON required'
+[ -n "${PHX_HOST:-}" ] || fail 'PHX_HOST required'
+DATABASE_URL=$(cat "$DATABASE_URL_FILE")
+SECRET_KEY_BASE=$(cat "$SECRET_KEY_BASE_FILE")
+[ -n "$DATABASE_URL" ] || fail 'Empty database URL'
+[ "${#SECRET_KEY_BASE}" -ge 64 ] || fail 'Signing secret must be at least 64 bytes'
+export DATABASE_URL SECRET_KEY_BASE
+unset DATABASE_URL_FILE SECRET_KEY_BASE_FILE MIGRATION_DATABASE_URL
+export PHX_SERVER=false
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+case "$command" in
+  start)
+    # Enforce release schema/ownership readiness before starting any app worker.
+    bin/ops_brain eval 'Code.eval_file("ops/preflight.exs")'
+    export PHX_SERVER=true
+    exec bin/ops_brain start
+    ;;
+  migrate) exec bin/ops_brain eval 'Code.eval_file("ops/migrate.exs")' ;;
+  preflight) exec bin/ops_brain eval 'Code.eval_file("ops/preflight.exs")' ;;
+esac

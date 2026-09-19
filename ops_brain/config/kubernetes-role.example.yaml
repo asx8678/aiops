@@ -1,0 +1,14 @@
+# NOT APPLIED. Source owner must replace namespace and bind a dedicated identity.
+# No RoleBinding or credential is provisioned automatically.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ops-brain-observer
+  namespace: replace-approved-namespace
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]

@@ -1,0 +1,13 @@
+# Reviewed HOST proxy example, not auto-installed or started by Compose.
+# Supply PHX_HOST in the proxy's environment; exact hostname, no scheme/path.
+{
+  admin off
+  auto_https off
+}
+https://{$PHX_HOST} {
+  tls /etc/ops-brain/tls/fullchain.pem /etc/ops-brain/tls/key.pem
+  reverse_proxy 127.0.0.1:4000 {
+    header_up X-Forwarded-Proto https
+  }
+}
+# Caddy supports WebSocket upgrades. No access log containing login query data.

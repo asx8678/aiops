@@ -1,0 +1,65 @@
+# Explicit handoff profiles only. No database provisioning, builds or auto-restarts.
+# Linux host networking is deliberate: existing prod config binds 127.0.0.1.
+name: ops-brain-handoff
+x-common: &common
+  image: ${OPS_BRAIN_IMAGE:-ops-brain:handoff}
+  user: "10001:10001"
+  network_mode: host
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777
+  pids_limit: 256
+  mem_limit: 1g
+  cpus: 2.0
+  restart: "no"
+  stop_grace_period: 45s
+  logging:
+    driver: local
+    options: {max-size: "10m", max-file: "3"}
+  environment: &environment
+    PHX_HOST: ${PHX_HOST:-}
+    DATABASE_CA_FILE: /run/secrets/database_ca
+    SECRET_KEY_BASE_FILE: /run/secrets/secret_key_base
+    OPS_BRAIN_CONFIG_FILE: /run/config/sources.json
+    OPS_BRAIN_START_APPROVED: ${OPS_BRAIN_START_APPROVED:-false}
+    # Keep loopback on host networking. Wildcard requires a reviewed bridge/proxy override.
+    HTTP_BIND: "127.0.0.1"
+    PORT: "4000"
+    POOL_SIZE: "10"
+    OPS_BRAIN_OIDC_ENABLED: "false"
+  volumes:
+    - type: bind
+      source: ${SOURCE_CONFIG_HOST_FILE:-/UNCONFIGURED/sources.json}
+      target: /run/config/sources.json
+      read_only: true
+      bind: {create_host_path: false}
+services:
+  app:
+    <<: *common
+    profiles: [handoff]
+    command: [start]
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/runtime_database_url
+    secrets: [runtime_database_url, secret_key_base, database_ca]
+  migrate:
+    <<: *common
+    profiles: [maintenance]
+    command: [disabled]
+    healthcheck: {disable: true}
+    environment:
+      <<: *environment
+      DATABASE_URL_FILE: /run/secrets/migration_database_url
+      OPS_BRAIN_MIGRATION_APPROVED: "false"
+    secrets: [migration_database_url, secret_key_base, database_ca]
+secrets:
+  runtime_database_url:
+    file: ${RUNTIME_DATABASE_URL_FILE:-/UNCONFIGURED/runtime_database_url}
+  migration_database_url:
+    file: ${MIGRATION_DATABASE_URL_FILE:-/UNCONFIGURED/migration_database_url}
+  secret_key_base:
+    file: ${SECRET_KEY_BASE_FILE:-/UNCONFIGURED/secret_key_base}
+  database_ca:
+    file: ${DATABASE_CA_HOST_FILE:-/UNCONFIGURED/database_ca.pem}

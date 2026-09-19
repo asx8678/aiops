@@ -1,0 +1,8 @@
+{
+  "sources": [],
+  "notification_sinks": {},
+  "maintenance_enabled": false,
+  "collection_enabled": false,
+  "delivery_enabled": false,
+  "multi_company_reviewed": false
+}

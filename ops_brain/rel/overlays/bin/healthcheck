@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+# Liveness only: no invented /health route and no login token in probes.
+# Trusted local forwarded-proto avoids the production HTTPS redirect.
+[ -n "${PHX_HOST:-}" ] || exit 1
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --noproxy '*' --connect-timeout 2 --max-time 5 \
+  -H "Host: $PHX_HOST" -H 'X-Forwarded-Proto: https' \
+  "http://127.0.0.1:${PORT:-4000}/sign-in")
+[ "$status" = 200 ]

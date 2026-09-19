@@ -1,0 +1,6 @@
+body {font: 1rem system-ui, sans-serif; background: #101923; color: #e6edf4; margin: 0; line-height: 1.6}
+header, main {max-width: 64rem; margin: auto; padding: 1.5rem}
+header {border-bottom: 1px solid #43566a}
+a {color: #8acbff} article, section {border: 1px solid #43566a; border-radius: .4rem; padding: 1rem; margin: 1rem 0}
+button, input {font: inherit; padding: .6rem; margin: .4rem 0} button {cursor: pointer}
+label {display: block} [role=alert] {color: #ffb5ae}

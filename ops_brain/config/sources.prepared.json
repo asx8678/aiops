@@ -1,0 +1,81 @@
+{
+  "maintenance_enabled": false,
+  "collection_enabled": false,
+  "delivery_enabled": false,
+  "multi_company_reviewed": false,
+  "sources": [
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "company_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "azure_build", "enabled": false,
+      "endpoint": "https://azure-build.example.invalid",
+      "approved_origins": ["https://azure-build.example.invalid"],
+      "approved_ips": ["192.0.2.10"], "network_reviewed": false,
+      "credential_env": "OPS_AZURE_BEARER_TOKEN", "anonymous_approved": false,
+      "organization": "REPLACE_ORGANIZATION",
+      "project_id": "00000000-0000-4000-8000-000000000020", "definitions": [7],
+      "stage_targets": [], "interval_seconds": 120, "max_bytes": 200000,
+      "page_size": 100, "max_pages": 10, "max_window_seconds": 3600,
+      "retention_days": 7, "requests_per_minute": 6
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "company_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "prometheus", "enabled": false,
+      "endpoint": "https://prometheus.example.invalid",
+      "approved_origins": ["https://prometheus.example.invalid"],
+      "approved_ips": ["192.0.2.11"], "network_reviewed": false,
+      "credential_env": "OPS_PROMETHEUS_BEARER_TOKEN", "anonymous_approved": false,
+      "service_id": "00000000-0000-4000-8000-000000000031",
+      "profile": {
+        "id": "storage-used-bytes", "version": 1, "reviewed": false,
+        "query": "REPLACE_WITH_APPROVED_GAUGE", "semantics": "gauge", "unit": "bytes",
+        "freshness_seconds": 120, "capacity_segment": "REPLACE_STABLE_SEGMENT_ID",
+        "capacity_policy": {
+          "unit": "bytes", "limits_verified": false, "effective_threshold": 0,
+          "freshness_seconds": 120, "max_gap_seconds": 180,
+          "min_history_seconds": 1800, "min_growth_bytes_per_second": 1,
+          "warning_horizon_seconds": 86400
+        }
+      },
+      "interval_seconds": 60, "max_bytes": 200000, "page_size": 100,
+      "max_pages": 10, "max_window_seconds": 3600, "retention_days": 14, "requests_per_minute": 6
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "company_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "loki", "enabled": false,
+      "endpoint": "https://loki.example.invalid", "approved_origins": ["https://loki.example.invalid"],
+      "approved_ips": ["192.0.2.12"], "network_reviewed": false,
+      "credential_env": "OPS_LOKI_BEARER_TOKEN", "anonymous_approved": false,
+      "tenant": "REPLACE_TRUSTED_TENANT", "service_id": "00000000-0000-4000-8000-000000000032",
+      "profile": {"id": "error-count", "version": 1, "reviewed": false,
+        "selector": "{service=\"REPLACE_SERVICE\",environment=\"REPLACE_ENV\"} | json | level=\"error\"", "minimum_count": 10},
+      "interval_seconds": 60, "max_bytes": 200000, "page_size": 100,
+      "max_pages": 10, "max_window_seconds": 3600, "retention_days": 7, "requests_per_minute": 6
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000014",
+      "company_id": "00000000-0000-4000-8000-000000000001",
+      "kind": "kubernetes", "enabled": false,
+      "endpoint": "https://kubernetes.example.invalid", "approved_origins": ["https://kubernetes.example.invalid"],
+      "approved_ips": ["192.0.2.13"], "network_reviewed": false,
+      "credential_env": "OPS_KUBERNETES_BEARER_TOKEN", "anonymous_approved": false,
+      "ca_file": "/run/secrets/kubernetes-ca.pem", "namespace": "replace-namespace",
+      "resources": ["deployments", "replicasets", "pods", "events"], "inventory_limit": 200,
+      "service_id": "00000000-0000-4000-8000-000000000033",
+      "interval_seconds": 30, "max_bytes": 500000, "page_size": 100,
+      "max_pages": 10, "max_window_seconds": 3600, "retention_days": 7, "requests_per_minute": 6
+    }
+  ],
+  "notification_sinks": {
+    "approved-company-channel": {
+      "approved": false, "enabled": false,
+      "company_id": "00000000-0000-4000-8000-000000000001",
+      "url": "https://notifications.example.invalid/ops-brain",
+      "approved_urls": ["https://notifications.example.invalid/ops-brain"],
+      "approved_ip": "192.0.2.14", "credential_env": "OPS_NOTIFICATION_BEARER_TOKEN",
+      "digest_seconds": 120, "cooldown_seconds": 600, "quiet_utc_hours": []
+    }
+  }
+}
