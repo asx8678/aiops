@@ -10,4 +10,3 @@ Read-only operations command center (`ops_brain/`) — Phoenix/LiveView, Ecto/Po
 Collection and delivery are disabled by default. No runtime AI, remediation,
 source mutation or fabricated healthy state. Live-provider acceptance remains an
 external, owner-approved gate.
-

@@ -32,4 +32,3 @@ cat "$work/probe.log"
 # Preserve evidence, including failures, rather than deleting the only build logs.
 trap - EXIT HUP INT TERM
 echo "NATIVE_RELEASE_OK artifacts=$work"
-

@@ -201,4 +201,3 @@ Commands/results:
 Deployment requires applying the migration as owner, then the appropriate reviewed grants before starting the new runtime. Do not roll back the new table merely to disable collection: that discards revision history. Keep collection/delivery disabled until deployment authorization and remaining acceptance gates are satisfied. Existing archived evidence is not retroactively reclassified or redacted.
 
 Remaining: R09 is the next independent slice (orphan-job recovery), followed by R10–R12 maintenance/retention. Earlier partial R02/R03/R04/R07/R08/R13/R14/R17 and other ledger tasks remain; audit/optimistic review concurrency, full crash/in-flight notification matrix, release/container/live-provider validation are not claimed complete. This continuation did not auto-advance into those independent changes.
-

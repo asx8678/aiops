@@ -76,4 +76,3 @@ jobs:
       - run: mise exec -- mix ops_brain.validate_config config/sources.prepared.json
       - name: Reject tracked source or lockfile mutations
         run: git diff --exit-code -- . ../.github
-
