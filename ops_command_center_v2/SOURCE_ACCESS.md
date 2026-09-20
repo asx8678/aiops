@@ -11,7 +11,7 @@ This is an access specification, not authorization to provision resources. Human
 | Log backend | Scoped read-only aggregate/search queries and bounded samples | Ingestion, index deletion, retention/rule changes, tenant administration |
 | Grafana | Optional read metadata/dashboard links; receive existing authorized alerts | Dashboard/annotation/rule writes, source credential access, silences/contact-policy administration |
 | Database/cloud metrics | Existing approved exporter metrics or resource-scoped metric/status reads | Application data access, SQL mutation, resizing, failover, maintenance execution |
-| Ops Brain PostgreSQL | Internal observations, findings, checkpoint and local workflow writes | Sharing records with unauthorized companies |
+| Constellation PostgreSQL | Internal observations, findings, checkpoint and local workflow writes | Sharing records with unauthorized companies |
 | Optional notification destination | Send/update only the application's approved messages to an approved destination | Broad channel history/account access, task execution, source remediation |
 
 An API query using POST can be read-only. Never rely solely on HTTP verbs. Every adapter operation needs an allowlisted endpoint/semantic purpose; there is no generic 'request any URL' tool.
@@ -40,7 +40,7 @@ For Loki, the source-bound tenant selection is enforced by trusted authenticatio
 2. Define dev/staging/prod targets; list unknown or absent environments explicitly.
 3. Add one source endpoint with a secret reference and allowed scope.
 4. Test a small approved read; show capability and permission results, not just HTTP success.
-5. Discover a bounded inventory and let an authorized operator approve monitoring scope inside Ops Brain.
+5. Discover a bounded inventory and let an authorized operator approve monitoring scope inside Constellation.
 6. Map services, workloads, pipeline stages, metrics, and log selectors. Unresolved items remain visible.
 7. Preview proposed collection frequency, query limits, sample retention and unsupported checks.
 8. Start bounded read-only collection, initially dashboard-only.

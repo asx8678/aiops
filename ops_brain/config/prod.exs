@@ -9,3 +9,5 @@ config :ops_brain, :secure_cookies, true
 config :ops_brain, OpsBrainWeb.Endpoint, force_ssl: [hsts: true, rewrite_on: [:x_forwarded_proto]]
 
 config :logger, level: :info
+
+config :ops_brain, dev_auto_login: false, dev_operator: nil

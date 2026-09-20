@@ -54,7 +54,7 @@ defmodule OpsBrain.Configuration do
         delivery_enabled: root["delivery_enabled"] == true
       }
     else
-      _ -> raise "Invalid or oversized Ops Brain deployment configuration"
+      _ -> raise "Invalid or oversized Constellation deployment configuration"
     end
   end
 

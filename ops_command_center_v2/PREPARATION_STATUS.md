@@ -1,6 +1,6 @@
 # Credential-free completion and deployment preparation
 
-Updated2026-09-19. The requested code/preparation pass is complete for the documented Ops Brain v2 contracts. This is **not** an assertion that all17 roadmap tasks have passed production acceptance: task016 still requires a real second company, and live-provider/hosting/security gates remain open. No production system, source configuration or external notification was changed.
+Updated2026-09-19. The requested code/preparation pass is complete for the documented Constellation contracts. This is **not** an assertion that all17 roadmap tasks have passed production acceptance: task016 still requires a real second company, and live-provider/hosting/security gates remain open. No production system, source configuration or external notification was changed.
 
 The application in `../ops_brain/` contains executable adapters, domain logic, persistence, workers, authentication, UI, maintenance, replay and tests—not empty placeholder modules. Placeholders are confined to disabled installation/credential configuration. The previous93-test baseline grew to **142 passing application tests**, plus **18 passing standalone deployment-contract tests**.
 

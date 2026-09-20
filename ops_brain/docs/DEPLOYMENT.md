@@ -1,6 +1,10 @@
 # Release/deployment handoff — disabled preparation only
 
-No infrastructure, endpoint, credential, recipient or deployment is approved by these files. No CI deployment job, database container, automatic migration, seed, restart policy or production rollout is provided. Run one application instance only. Existing operations must continue independently if Ops Brain is stopped.
+No infrastructure, endpoint, credential, recipient or deployment is approved by these files. No CI deployment job, database container, automatic migration, seed, restart policy or production rollout is provided. Run one application instance only. Existing operations must continue independently if Constellation is stopped.
+
+## Single-workspace entry
+
+Set `OPS_BRAIN_WORKSPACE_COMPANY_ID` to the approved company UUID to pin the home dashboard for this deployment. The setting does not grant membership. Without it, exactly one authorized membership resolves automatically; ambiguity or missing access shows a setup state rather than a company chooser. Invalid/blank configured values never fall back to another workspace. Compose requires an explicit reviewed environment override for this optional setting. See [`SINGLE_WORKSPACE.md`](SINGLE_WORKSPACE.md).
 
 ## Actual release contract
 
@@ -26,7 +30,7 @@ Native and container releases use the same `config/prod.exs` and `config/runtime
 
 ### Internal operational metrics
 
-Set `OPS_BRAIN_METRICS_CONSOLE=true` to supervise console export of sanitized application events; unset it or set `false` and restart to disable (default off). Pass it explicitly through the container environment when using Docker. Export covers queue/outcome counts, exceptions, Lifeline rescued/discarded totals, queue age/database size, terminal-job backlog and cleanup counts. These measure Ops Brain itself, not monitored-service health. Queue/state dimensions are allowlisted. Raw Oban, Repo and Phoenix events are NOT exported: the stock reporter prints all metadata. No source IDs, job arguments, SQL parameters or errors are exported.
+Set `OPS_BRAIN_METRICS_CONSOLE=true` to supervise console export of sanitized application events; unset it or set `false` and restart to disable (default off). Pass it explicitly through the container environment when using Docker. Export covers queue/outcome counts, exceptions, Lifeline rescued/discarded totals, queue age/database size, terminal-job backlog and cleanup counts. These measure Constellation itself, not monitored-service health. Queue/state dimensions are allowlisted. Raw Oban, Repo and Phoenix events are NOT exported: the stock reporter prints all metadata. No source IDs, job arguments, SQL parameters or errors are exported.
 
 Console output is per event, not a durable time-series store or rate-limited exporter. Route stdout to approved log collection and size retention/throughput before enabling. Backlog polling is every ten seconds; large-table query-cost/load validation and alert thresholds remain deployment gates.
 

@@ -7,6 +7,8 @@ defmodule OpsBrainWeb.OperatorAuth do
   def init(action), do: action
 
   def call(conn, :fetch) do
+    conn = OpsBrainWeb.DevAutoLogin.call(conn, [])
+
     Plug.Conn.assign(
       conn,
       :current_operator,

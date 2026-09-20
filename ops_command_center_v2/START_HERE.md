@@ -3,7 +3,7 @@
 Use this after placing the pack in the repository or providing its files as context. Do not overwrite existing repository instructions without reconciling conflicts.
 
 ```text
-Read the Ops Brain v2 AGENTS.md, IMPLEMENTATION_BRIEF.md,
+Read the Constellation AGENTS.md, IMPLEMENTATION_BRIEF.md,
 SOURCE_ACCESS.md, ROADMAP.md and tasks/000-discovery.md.
 
 We are building a supplementary operations command center across

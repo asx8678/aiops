@@ -1,4 +1,4 @@
-# aiops
+# Constellation
 
 Read-only operations command center (`ops_brain/`) — Phoenix/LiveView, Ecto/PostgreSQL and Oban.
 

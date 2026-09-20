@@ -2,7 +2,12 @@ defmodule OpsBrainWeb.SessionController do
   use OpsBrainWeb, :controller
   alias OpsBrain.Accounts
 
-  def new(conn, _params), do: render(conn, :new, failed: false)
+  def new(conn, _params) do
+    # Already-authenticated operators (including development auto-login) skip the form.
+    if conn.assigns[:current_operator],
+      do: redirect(conn, to: "/"),
+      else: render(conn, :new, failed: false)
+  end
 
   def create(conn, %{"login" => %{"token" => token}}) do
     case Accounts.exchange_login_token(token) do

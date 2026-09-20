@@ -1,5 +1,10 @@
 import Config
 
+# Deployment-owned home selection; membership is still checked on every read.
+if workspace_id = System.get_env("OPS_BRAIN_WORKSPACE_COMPANY_ID") do
+  config :ops_brain, :workspace_company_id, workspace_id
+end
+
 config :phoenix, :filter_parameters, [
   "token",
   "password",

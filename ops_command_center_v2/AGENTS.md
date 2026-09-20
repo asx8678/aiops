@@ -1,4 +1,4 @@
-# Agent working agreement — Ops Brain v2
+# Agent working agreement — Constellation
 
 ## Mission and authority
 Build the currently assigned slice of a supplementary, read-only, no-AI operations command center. Preserve the existing repository and its conventions. This brief provides direction, not authorization to implement every layer or touch live infrastructure.

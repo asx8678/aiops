@@ -57,6 +57,11 @@ defmodule OpsBrain.Tenancy do
 
   def with_scope(_, _), do: {:error, :unauthorized}
 
+  @doc "Authorized company identity for navigation, without loading operational datasets."
+  def company(scope) do
+    with_scope(scope, fn -> Repo.get!(Company, scope.company_id) end)
+  end
+
   def overview(scope) do
     with_scope(scope, fn ->
       %{

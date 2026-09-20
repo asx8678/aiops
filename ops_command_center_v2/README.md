@@ -1,4 +1,4 @@
-# Ops Brain v2 — Read-Only Operations Command Center
+# Constellation — Read-Only Operations Command Center
 
 Status: proposed engineering specification. No application, live integration, security audit, load test, or benchmark is supplied by this pack.
 Validated against primary integration documentation on September 19, 2026. Installed company versions, entitlements, source coverage, and network access still require validation.
@@ -16,7 +16,7 @@ A supplementary Elixir/Phoenix application that continuously checks authorized c
 - Polling is a first-class implementation strategy. Webhooks are optional accelerators, not a deployment prerequisite.
 
 ## What changes from the previous pack
-This specification supersedes conflicting directions in the earlier Ops Brain pack. Do not run both briefs as competing instructions.
+This specification supersedes conflicting directions in the earlier Constellation pack. Do not run both briefs as competing instructions.
 
 1. The product is broader than change-to-incident correlation: pipeline failures, log bursts, workload problems, capacity risks, and monitoring gaps deliver independent value.
 2. Multi-company scope is included from the first schema and authorization work. Still connect sources incrementally.

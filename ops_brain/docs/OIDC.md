@@ -77,7 +77,7 @@ no environment or browser configuration surface.
   `azp` for multiple audiences, expiry, issued-at, optional not-before, nonce,
   bounded nonempty subject and preapproval. JOSE uses a strict RS256 allowlist and
   a unique matching `kid` from the reviewed JWKS; ambiguous/invalid/unknown keys fail.
-- Success renews/clears the session and renders a local **Continue to Ops Brain**
+- Success renews/clears the session and renders a local **Continue to Constellation**
   link. The intentional full document + user navigation ends the cross-site chain
   before sending the Strict session cookie. Failure deletes the OIDC cookie and
   returns a generic 401, without echoing provider/user parameters.

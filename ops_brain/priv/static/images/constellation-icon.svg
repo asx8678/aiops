@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <style>:root{color:#141a29}@media(prefers-color-scheme:dark){:root{color:#ffffff}}</style>
+  <path d="M48 14 29 9 12 24 16 45 36 55 53 42M29 9 30 32 12 24M30 32 16 45M30 32 36 55M30 32 48 14M30 32 53 42" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="currentColor">
+    <circle cx="48" cy="14" r="4"/><circle cx="29" cy="9" r="3.5"/><circle cx="12" cy="24" r="4"/>
+    <circle cx="16" cy="45" r="3.5"/><circle cx="36" cy="55" r="4"/><circle cx="53" cy="42" r="3.5"/>
+    <path d="m30 25 2 5 5 2-5 2-2 5-2-5-5-2 5-2Z"/>
+  </g>
+</svg>

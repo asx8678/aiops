@@ -19,7 +19,7 @@ The repository contains a specification pack, not an existing application. There
 ## Decision and consequences
 Use one modular Phoenix/LiveView application with Ecto/PostgreSQL and Oban. Choose and lock compatible versions in task 001 after review; no dependency version is asserted here. PostgreSQL is the durable source of truth. Avoid a second telemetry warehouse, per-service actors and new brokers.
 
-Adapters expose approved read operations only, never a generic arbitrary-URL client to operators or source payloads. Runtime AI libraries, model services, embeddings and AI egress are excluded. Local acknowledgment changes only application state. External delivery is off until separately approved and uses a distinct credential. Existing monitoring, deployments and paging must work with Ops Brain stopped.
+Adapters expose approved read operations only, never a generic arbitrary-URL client to operators or source payloads. Runtime AI libraries, model services, embeddings and AI egress are excluded. Local acknowledgment changes only application state. External delivery is off until separately approved and uses a distinct credential. Existing monitoring, deployments and paging must work with Constellation stopped.
 
 Application-scoped query APIs and composite company relationships begin with task 001. Transaction-local scope must be reset on success, rollback and connection reuse. Tested PostgreSQL RLS with a non-owner, non-BYPASSRLS runtime role is mandatory before the second real company; application authorization is still required. No unauthenticated production bypass may substitute for pending SSO setup.
 

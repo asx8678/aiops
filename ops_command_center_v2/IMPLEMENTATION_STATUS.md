@@ -1,4 +1,4 @@
-# Ops Brain v2 — implementation ledger
+# Constellation — implementation ledger
 
 Updated 2026-09-19 after the credential-free completion pass. The user authorized all17 roadmap tasks (000–016) and subsequent code/preparation work, superseding the original one-task stopping rule. Application: `../ops_brain/`. Original specifications and source safety boundaries are preserved.
 

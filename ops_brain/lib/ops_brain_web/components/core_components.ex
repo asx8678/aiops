@@ -8,7 +8,8 @@ defmodule OpsBrainWeb.CoreComponents do
   with doc strings and declarative assigns. You may customize and style
   them in any way you want, based on your application growth and needs.
 
-  The foundation for styling is Tailwind CSS, a utility-first CSS framework,
+  The current console uses local semantic CSS in priv/static/assets/css/app.css.
+  These generated helpers also retain compatibility classes from Tailwind CSS,
   augmented with daisyUI, a Tailwind CSS plugin that provides UI components
   and themes. Here are useful references:
 
@@ -62,11 +63,11 @@ defmodule OpsBrainWeb.CoreComponents do
       id={@id}
       data-flash
       role="alert"
-      class="toast toast-top toast-end z-50"
+      class="toast"
       {@rest}
     >
       <div class={[
-        "alert w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
+        "alert",
         @kind == :info && "alert-info",
         @kind == :error && "alert-error"
       ]}>
@@ -77,7 +78,12 @@ defmodule OpsBrainWeb.CoreComponents do
           <p>{msg}</p>
         </div>
         <div class="flex-1" />
-        <button type="button" class="group self-start cursor-pointer" aria-label="close">
+        <button
+          type="button"
+          class="flash-close"
+          aria-label="Dismiss notification"
+          phx-click={JS.hide(to: "##{@id}")}
+        >
           <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
         </button>
       </div>
@@ -425,17 +431,10 @@ defmodule OpsBrainWeb.CoreComponents do
   end
 
   @doc """
-  Renders a [Heroicon](https://heroicons.com).
-
-  Heroicons come in three styles – outline, solid, and mini.
-  By default, the outline style is used, but solid and mini may
-  be applied by using the `-solid` and `-mini` suffix.
-
-  You can customize the size and colors of the icons by setting
-  width, height, and background color classes.
-
-  Icons are extracted from the `deps/heroicons` directory and bundled within
-  your compiled app.css by the plugin in `assets/vendor/heroicons.js`.
+  Renders a local outline SVG using the existing hero-* naming convention.
+  Icons are decorative; give their enclosing control an accessible label.
+  Sizing and colors are supplied by the console stylesheet; no asset compiler
+  or external icon font is required.
 
   ## Examples
 
@@ -445,11 +444,60 @@ defmodule OpsBrainWeb.CoreComponents do
   attr :name, :string, required: true
   attr :class, :any, default: "size-4"
 
-  def icon(%{name: "hero-" <> _} = assigns) do
+  def icon(%{name: "hero-" <> name} = assigns) do
+    assigns = assign(assigns, :path, icon_path(name))
+
     ~H"""
-    <span class={[@name, @class]} />
+    <svg
+      class={["icon", @class]}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.65"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    ><path d={@path} /></svg>
     """
   end
+
+  # Local SVGs keep icons independent of a CSS build or external font/CDN.
+  defp icon_path("square-3-stack-3d"), do: "m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"
+  defp icon_path("squares-2x2"), do: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"
+
+  defp icon_path("building-office-2"),
+    do:
+      "M3 21V3h12v18M15 9h6v12M1 21h22M7 7h1m3 0h1M7 11h1m3 0h1M7 15h1m3 0h1M7 21v-3h4v3M18 13h1m-1 4h1"
+
+  defp icon_path("command-line"),
+    do:
+      "M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm3 4 4 4-4 4m7 0h3"
+
+  defp icon_path("server-stack"),
+    do: "M4 3h16v7H4zM4 14h16v7H4zM7 6.5h.01M7 17.5h.01M15 6.5h2m-2 11h2"
+
+  defp icon_path("magnifying-glass"), do: "M20 20l-5-5m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
+  defp icon_path("chart-bar"), do: "M3 3v18h18M7 17v-5m5 5V7m5 10V4"
+
+  defp icon_path("signal"),
+    do:
+      "M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14M8 8a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8m-4-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"
+
+  defp icon_path("shield-check"), do: "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm-4 9 3 3 5-6"
+  defp icon_path("lock-closed"), do: "M6 10h12v11H6zM8 10V7a4 4 0 0 1 8 0v3m-4 5v2"
+  defp icon_path("arrow-right-on-rectangle"), do: "M9 4H4v16h5m5-12 4 4-4 4m-6-4h13"
+  defp icon_path("arrow-right"), do: "M4 12h16m-6-6 6 6-6 6"
+  defp icon_path("chevron-down"), do: "m6 9 6 6 6-6"
+
+  defp icon_path("arrow-path"),
+    do: "M20 10a8 8 0 0 0-14-5L3 8m0-5v5h5M4 14a8 8 0 0 0 14 5l3-3m0 5v-5h-5"
+
+  defp icon_path("clock"), do: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-5v5l3 2"
+  defp icon_path("x-mark"), do: "m6 6 12 12M6 18 18 6"
+  defp icon_path("check"), do: "m5 12 4 4L19 6"
+  defp icon_path("exclamation-circle"), do: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-5v6m0 3h.01"
+  defp icon_path(_), do: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-1v6m0-10h.01"
 
   ## JS Commands
 

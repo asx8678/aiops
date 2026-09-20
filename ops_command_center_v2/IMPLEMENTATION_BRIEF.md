@@ -1,4 +1,4 @@
-# Ops Brain v2 — implementation brief
+# Constellation — implementation brief
 
 Status: a proposed design. Targets, intervals, thresholds, table names, and examples are engineering proposals, not measurements or installed configuration.
 

@@ -19,7 +19,7 @@ Status: test requirements, not executed test results. Use real PostgreSQL for da
 - Runtime works with AI credentials absent and AI egress denied; dependency/network review finds no model calls.
 - Local acknowledgment does not call upstream alert/silence APIs or modify a source.
 - Notification identity cannot act as the observation/deployment identity.
-- Stopping Ops Brain leaves existing deployment, scrape, alert evaluation and paging paths unchanged.
+- Stopping Constellation leaves existing deployment, scrape, alert evaluation and paging paths unchanged.
 
 ## Azure DevOps collection
 - More than one result page is returned; all pages are persisted before complete-window checkpoint.

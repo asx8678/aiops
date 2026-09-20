@@ -25,8 +25,9 @@ defmodule OpsBrainWeb.AuthorizationTest do
   test "company portfolio and direct source URLs enforce membership", f do
     conn = init_test_session(f.conn, operator_token: f.token_a)
     {:ok, view, _} = live(conn, "/")
-    assert has_element?(view, "#companies-#{f.a.id}")
-    refute has_element?(view, "#companies-#{f.b.id}")
+    assert has_element?(view, "#home-workspace[data-company-id='#{f.a.id}']")
+    refute has_element?(view, "#home-workspace[data-company-id='#{f.b.id}']")
+    refute has_element?(view, "#companies")
     assert has_element?(view, "#coverage-not-configured")
     assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, "/companies/#{f.b.id}")
     {:ok, view, _} = live(conn, "/companies/#{f.a.id}/sources/#{f.source_a.id}")

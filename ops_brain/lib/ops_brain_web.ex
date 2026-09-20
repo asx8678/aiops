@@ -85,6 +85,7 @@ defmodule OpsBrainWeb do
       # Common modules used in templates
       alias Phoenix.LiveView.JS
       alias OpsBrainWeb.Layouts
+      alias OpsBrainWeb.UI
 
       # Routes generation with the ~p sigil
       unquote(verified_routes())

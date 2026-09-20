@@ -1,8 +1,18 @@
-# Ops Brain — read-only operations command center
+# Constellation — read-only operations command center
+
+Constellation is the product name. Internal `OpsBrain`/`OpsBrainWeb` modules, `ops_brain` application/directory/database identifiers, and `OPS_BRAIN_*` configuration names remain unchanged for compatibility; the commands below still apply.
 
 Phoenix/LiveView, Ecto/PostgreSQL and Oban. Local functionality includes authenticated company isolation, durable Azure Build polling, bounded failure evidence, exact grouping/local notices, configurable Prometheus/Loki reads, explicit service identities, namespace Deployment/ReplicaSet/Pod/Event watches, conditional capacity evaluation, evidence-linked change candidates, optional approved HTTP delivery, retention and replay.
 
 **Not production-ready or live-validated.** Collection and delivery are disabled by default. No runtime AI, remediation, source mutation or fabricated healthy data. Precise task/gap ledger: [`../ops_command_center_v2/IMPLEMENTATION_STATUS.md`](../ops_command_center_v2/IMPLEMENTATION_STATUS.md). The user explicitly requested all remaining local slices; original safety gates remain binding.
+
+## Single-workspace home
+
+Open **http://localhost:4000/** for the “A clearer view of operations” home, with direct operations navigation and Development / Staging / Production cards. No company selection is needed. Local development selects the seeded demo; deployments use `OPS_BRAIN_WORKSPACE_COMPANY_ID` for an approved company. Membership checks remain intact. See [`docs/SINGLE_WORKSPACE.md`](docs/SINGLE_WORKSPACE.md) for setup, environment filtering, and monochrome logo assets.
+
+## Offline demo — no cluster access required
+
+A separate **Demo · Northwind Retail** workspace contains two simulated Kubernetes clusters, 210 pods, databases, pipeline history, and evidence-linked investigations. All demo pages are explicitly labeled synthetic. See [`docs/DEMO.md`](docs/DEMO.md) for provisioning, the guided tour, reset/removal, and verification. No live connector configuration is changed.
 
 ## September 20 repair status
 
@@ -41,6 +51,8 @@ psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f priv/repo/runtime_grants.sq
 All migrations are required. Startup verifies forced RLS/non-ownership on 15 operational tables and refuses superuser/BYPASSRLS/owner identities. The company/operator/membership/session directory remains internal authorization metadata, not a global operator data API. Runtime cannot administer identities.
 
 ## Authentication and use
+
+**Temporary local mode:** development now opens directly at `http://localhost:4000` as the existing `adam` operator, without a login form or token entry. Development page GETs skip login regardless of host/proxy headers; keep the development listener private because anyone who can reach it can act as that operator. Production/test authentication is unchanged. See [`docs/LOCAL_DEVELOPMENT.md`](docs/LOCAL_DEVELOPMENT.md) for configuration, restrictions, tests, and how to restore normal login. The following token/SSO workflow applies outside that local mode.
 
 Optional OIDC SSO is implemented and disabled until configured; see [`docs/OIDC.md`](docs/OIDC.md). MFA policy is enforced by the approved identity provider, not inferred by this app. Offline-issued 256-bit single-use capabilities remain available, stored hashed. No public registration, default password or production bypass:
 
