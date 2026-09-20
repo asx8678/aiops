@@ -1,10 +1,9 @@
 # This file is responsible for configuring your application
 # and its dependencies with the aid of the Config module.
 #
-# This configuration file is loaded before any dependency and
-# is restricted to this project.
+# This configuration file is loaded before any dependency and is restricted
+# to this project.
 
-# General application configuration
 import Config
 
 config :ops_brain,
@@ -23,9 +22,7 @@ config :ops_brain, OpsBrainWeb.Endpoint,
   live_view: [signing_salt: "A9dOCUQt"]
 
 # Configure LiveView
-config :phoenix_live_view,
-  # the attribute set on all root tags. Used for Phoenix.LiveView.ColocatedCSS.
-  root_tag_attribute: "phx-r"
+config :phoenix_live_view, root_tag_attribute: "phx-r"
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,
@@ -40,13 +37,16 @@ config :ops_brain, OpsBrain.Repo, log: false
 config :ops_brain, Oban,
   repo: OpsBrain.Repo,
   queues: [collect: 4, enrich: 2, delivery: 1, maintenance: 1],
-  plugins: false,
-  peer: false
+  plugins: [
+    {Oban.Lifeline, rescue_after: {10, :minutes}, interval: {1, :minute}}
+  ],
+  peer: Oban.Peers.Database
 
 config :ops_brain,
   maintenance_enabled: false,
   collection_enabled: false,
   delivery_enabled: false,
+  metrics_console: false,
   sources: %{},
   notification_sinks: %{}
 

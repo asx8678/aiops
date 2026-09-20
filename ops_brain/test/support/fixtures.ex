@@ -4,7 +4,32 @@ defmodule OpsBrain.Fixtures do
   alias OpsBrain.Accounts.Operator
   alias OpsBrain.Tenancy.{Company, Membership}
 
+  def verify_disposable! do
+    # Naming alone is not permission to truncate an existing database.
+    unless System.get_env("OPS_BRAIN_DISPOSABLE_TEST") == "true",
+      do: raise("Explicit disposable test approval required")
+
+    identity = fn repo ->
+      repo.query!("""
+      SELECT current_database(), current_user, current_setting('port'),
+             current_setting('ops_brain.disposable_test',true),
+             COALESCE(inet_server_addr()::text,'local'),
+             (SELECT oid::text FROM pg_database WHERE datname=current_database())
+      """).rows
+    end
+
+    [[db, runtime, port, "approved", host, oid]] = identity.(Repo)
+    [[^db, migrator, ^port, "approved", ^host, ^oid]] = identity.(TestAdminRepo)
+
+    unless runtime != migrator and String.starts_with?(db, "ops_brain_test"),
+      do: raise("Disposable runtime/migrator identity mismatch")
+
+    :ok
+  end
+
   def clean! do
+    verify_disposable!()
+
     TestAdminRepo.query!(
       "TRUNCATE oban_jobs, operator_tokens, memberships, sources, environments, companies, operators CASCADE"
     )

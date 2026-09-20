@@ -4,6 +4,10 @@ Phoenix/LiveView, Ecto/PostgreSQL and Oban. Local functionality includes authent
 
 **Not production-ready or live-validated.** Collection and delivery are disabled by default. No runtime AI, remediation, source mutation or fabricated healthy data. Precise task/gap ledger: [`../ops_command_center_v2/IMPLEMENTATION_STATUS.md`](../ops_command_center_v2/IMPLEMENTATION_STATUS.md). The user explicitly requested all remaining local slices; original safety gates remain binding.
 
+## September 20 repair status
+
+The current repair pass is **partial**. See [`REPAIR_STATUS.md`](../ops_command_center_v2/REPAIR_STATUS.md) for R01–R25 status and actual checks. Quoted-assignment redaction now consumes malformed quoted tails, validates UTF-8 before regex processing, and rejects inputs over 1 MiB. This does not sanitize previously stored evidence or backups; any such remediation requires separate authorization. Lifecycle, scheduling, retention, CI and composed acceptance work remain outstanding.
+
 ## Ready-to-fill preparation
 
 Start with [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md), [`config/sources.prepared.json`](config/sources.prepared.json), and `.env.example`. All connectors, notifications, OIDC and scheduled maintenance default off. Untouched source/sink placeholders are rejected if enabled. Supply secret references through private environment or mounted secret files, never chat or tracked configuration.
@@ -66,7 +70,9 @@ Jobs perform one bounded collection step with durable checkpoints/snapshots and 
 
 ## Verification
 
-Tests require disposable `ops_brain_test...` databases and **both** URLs. Fixtures truncate local tables between serial DB cases. Never point tests at valuable data. OpenSSL creates ephemeral local TLS test certificates; tests remove them. No real provider is contacted.
+Tests require newly provisioned disposable `ops_brain_test...` databases and **both** URLs pointing to the same local server/database with distinct runtime/migrator identities. Fixtures truncate local tables between serial DB cases. Never point tests at valuable data.
+
+Before testing, explicitly approve only the newly created disposable database as administrator with `ALTER DATABASE <exact_new_test_database> SET ops_brain.disposable_test='approved';`, then export `OPS_BRAIN_DISPOSABLE_TEST=true`. Never mark an existing valuable database. The test helper checks approval and live connection identity before any test module runs. Use `mise exec -- mix ci` for non-mutating checks; `mix precommit` remains an auto-formatting developer command. The added GitHub workflow has not been remotely verified and does not yet cover all release/container acceptance gates. OpenSSL creates ephemeral local TLS test certificates; tests remove them. No real provider is contacted.
 
 ```sh
 mix precommit

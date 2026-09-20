@@ -6,6 +6,8 @@ defmodule OpsBrain.InvestigationWorker do
 
   alias OpsBrain.{SourceConfig, Store, Evidence, Correlation}
 
+  def timeout(_job), do: :timer.minutes(5)
+
   def perform(%Oban.Job{args: %{"source_id" => source, "group_id" => id}}) do
     case SourceConfig.transaction(source, fn c -> evaluate(c, id, Store.now()) end) do
       {:ok, _} -> :ok

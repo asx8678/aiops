@@ -10,4 +10,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON sources, environments, collection_states
 GRANT SELECT, INSERT, UPDATE, DELETE ON oban_jobs, oban_peers TO ops_brain_runtime;
 REVOKE UPDATE ON observation_revisions FROM ops_brain_runtime;
 GRANT SELECT, INSERT, DELETE ON observation_revisions TO ops_brain_runtime;
+-- Immutable occurrence history: append/expire only, never edit in place.
+REVOKE UPDATE ON occurrence_evidence FROM ops_brain_runtime;
+GRANT SELECT, INSERT, DELETE ON occurrence_evidence TO ops_brain_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ops_brain_runtime;

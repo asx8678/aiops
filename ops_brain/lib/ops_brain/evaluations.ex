@@ -4,22 +4,28 @@ defmodule OpsBrain.Evaluations do
 
   def capacity(c, finish, now) do
     policy = get_in(c, [:profile, :capacity_policy])
+    profile = c[:profile]
 
-    if policy && c[:service_id] do
+    if policy && c[:service_id] && profile do
+      key = "#{profile.id}:v#{profile.version}"
+
+      # Isolate one profile version: never mix samples evaluated under a
+      # different retained policy/version into the current series.
       rows =
         Store.rows(
-          "SELECT id::text,window_end,received_at,data FROM observation_windows WHERE source_id=$1::text::uuid AND kind='prometheus' AND window_end <= $2 AND received_at <= $3 ORDER BY window_end DESC LIMIT 60",
-          [c.id, finish, now]
+          "SELECT id::text,window_end,received_at,data FROM observation_windows WHERE source_id=$1::text::uuid AND kind='prometheus' AND profile=$2 AND window_end <= $3 AND received_at <= $4 AND service_id=$5::text::uuid ORDER BY window_end DESC LIMIT 60",
+          [c.id, key, finish, now, c.service_id]
         )
         |> Enum.reverse()
 
       samples =
-        Enum.flat_map(rows, fn r ->
+        rows
+        |> Enum.flat_map(fn r ->
           case r["data"]["samples"] do
-            [s] ->
+            [s] when is_map(s) ->
               [
                 %{
-                  time: DateTime.to_unix(r["window_end"]),
+                  time: if(r["data"]["coverage"] == "complete", do: s["timestamp"]),
                   received_at: DateTime.to_unix(r["received_at"]),
                   value: s["value"],
                   unit: r["data"]["unit"],
@@ -29,7 +35,7 @@ defmodule OpsBrain.Evaluations do
               ]
 
             _ ->
-              []
+              [%{time: nil, received_at: DateTime.to_unix(r["received_at"])}]
           end
         end)
 
@@ -38,6 +44,8 @@ defmodule OpsBrain.Evaluations do
       data = %{
         "detector" => "storage_headroom",
         "version" => 1,
+        "profile" => key,
+        "policy_version" => Map.get(policy, :version, 1),
         "result" => result,
         "input_window_ids" => Enum.map(rows, & &1["id"]),
         "input_samples" => samples,
@@ -55,33 +63,43 @@ defmodule OpsBrain.Evaluations do
           now
         )
 
-      if result.condition in ["warning", "critical"] do
-        fp =
-          Fingerprints.identify(
-            c.company_id,
-            c.service_id,
-            "storage_headroom_v1",
-            "Conditional storage threshold estimate"
+      fp =
+        Fingerprints.identify(
+          c.company_id,
+          c.service_id,
+          capacity_identity(key, policy),
+          "Conditional storage threshold estimate"
+        )
+
+      cond do
+        result.condition in ["warning", "critical"] ->
+          Issues.record(
+            c,
+            "capacity:#{key}:#{Store.digest(policy)}:#{Store.iso(finish)}",
+            evidence,
+            fp,
+            %{
+              occurred_at: finish,
+              severity: result.condition,
+              scope: c.service_id,
+              count_basis: "distinct evaluation windows; conditional estimate"
+            },
+            now
           )
 
-        Issues.record(
-          c,
-          "capacity:#{Store.iso(finish)}",
-          evidence,
-          fp,
-          %{
-            occurred_at: finish,
-            severity: result.condition,
-            scope: c.service_id,
-            count_basis: "distinct evaluation windows; conditional estimate"
-          },
-          now
-        )
+        result.condition == "normal" ->
+          OpsBrain.Recovery.capacity(c, c.service_id, key, policy, evidence, result, now)
+
+        true ->
+          :ok
       end
 
       result
     end
   end
+
+  def capacity_identity(profile, policy),
+    do: "storage_headroom_v1:#{profile}:#{Store.digest(policy)}"
 
   def correlate(scope, symptom_id, change_ids, topology, now) do
     if length(change_ids) <= 20 do
@@ -112,7 +130,6 @@ defmodule OpsBrain.Evaluations do
             Enum.filter(rows, &(&1["id"] in change_ids and &1["kind"] == "deployment"))
             |> Enum.map(fact)
 
-          # Topology must be provided by trusted configuration, not a browser event.
           OpsBrain.Correlation.evaluate(fact.(symptom), changes, topology, DateTime.to_unix(now))
         else
           %{

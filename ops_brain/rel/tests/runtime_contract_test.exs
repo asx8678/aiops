@@ -35,12 +35,13 @@ defmodule ReleaseRuntimeContractTest do
       "PORT" => "4000",
       "POOL_SIZE" => "10",
       "HTTP_BIND" => nil,
+      "OPS_BRAIN_METRICS_CONSOLE" => nil,
       "OPS_BRAIN_OIDC_ENABLED" => nil
     }
 
     ReleaseTestEnv.with_env(Map.merge(env, extra), fn ->
-      path = Path.join(@root, "config/runtime.exs")
-      fragment = File.read!(Path.join(@root, "rel/container.runtime.exs"))
+      production = File.read!(Path.join(@root, "config/prod.exs"))
+      runtime = File.read!(Path.join(@root, "config/runtime.exs"))
 
       temporary =
         Path.join(
@@ -48,14 +49,7 @@ defmodule ReleaseRuntimeContractTest do
           "ops-brain-runtime-#{System.unique_integer([:positive])}.exs"
         )
 
-      production = File.read!(Path.join(@root, "config/prod.exs"))
-      compile_fragment = File.read!(Path.join(@root, "rel/container.prod.exs"))
-
-      File.write!(
-        temporary,
-        Enum.join([production, compile_fragment, File.read!(path), fragment], "\n"),
-        [:exclusive]
-      )
+      File.write!(temporary, Enum.join([production, runtime], "\n"), [:exclusive])
 
       try do
         Config.Reader.read!(temporary, env: :prod)
@@ -74,10 +68,11 @@ defmodule ReleaseRuntimeContractTest do
     assert endpoint[:force_ssl] == [hsts: true, rewrite_on: [:x_forwarded_proto]]
     assert endpoint[:url] == [host: "unit.invalid", port: 443, scheme: "https"]
     assert cfg[OpsBrain.Repo][:ssl] == [verify: :verify_peer, cacertfile: "/unit/ca.pem"]
+    refute cfg[:metrics_console]
     assert cfg[:oidc][:enabled] == false
   end
 
-  test "image binding supports reviewed wildcard and rejects arbitrary addresses" do
+  test "production binding supports reviewed wildcard and rejects arbitrary addresses" do
     cfg = config(%{"HTTP_BIND" => "0.0.0.0", "PORT" => "4010", "PHX_SERVER" => "false"})
     assert cfg[:ops_brain][OpsBrainWeb.Endpoint][:http] == [port: 4010, ip: {0, 0, 0, 0}]
     refute cfg[:ops_brain][OpsBrainWeb.Endpoint][:server]
@@ -85,6 +80,11 @@ defmodule ReleaseRuntimeContractTest do
     for bad <- ["", "localhost", "::", "192.0.2.1", "0.0.0.0;exec"] do
       assert_raise RuntimeError, ~r/HTTP_BIND/, fn -> config(%{"HTTP_BIND" => bad}) end
     end
+  end
+
+  test "metrics export requires explicit opt-in" do
+    assert config(%{"OPS_BRAIN_METRICS_CONSOLE" => "true"})[:ops_brain][:metrics_console]
+    refute config(%{"OPS_BRAIN_METRICS_CONSOLE" => "false"})[:ops_brain][:metrics_console]
   end
 
   test "release Elixir files parse without loading production application" do

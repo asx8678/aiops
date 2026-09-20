@@ -111,12 +111,17 @@ defmodule OpsBrain.TelemetrySourcesTest do
     end)
 
     assert {:ok, _} = TelemetryCollection.tick(c.id, f.now)
-    assert_receive %{"limit" => "200"}
+    assert_receive %{"limit" => "100"}
     later = DateTime.add(f.now, 31)
     Application.put_env(:ops_brain, :clock, fn -> later end)
     assert {:ok, _} = TelemetryCollection.tick(c.id, later)
     assert_receive %{"watch" => "true", "resourceVersion" => "opaque:not-a-number"}
-    assert_receive %{"limit" => "200"}
+    # One bounded request per tick: expired watch records a gap, then relists next tick.
+    refute_receive %{"limit" => _}
+    relist_at = DateTime.add(later, 31)
+    Application.put_env(:ops_brain, :clock, fn -> relist_at end)
+    assert {:ok, _} = TelemetryCollection.tick(c.id, relist_at)
+    assert_receive %{"limit" => "100"}
     assert {:ok, windows} = Services.windows(f.scope_a)
     assert Enum.any?(windows, &(&1["data"]["gap"] == true))
   end

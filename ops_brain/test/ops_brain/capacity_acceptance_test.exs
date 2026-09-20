@@ -34,6 +34,7 @@ defmodule OpsBrain.CapacityAcceptanceTest do
   end
 
   test "public APIs retain the existing conditional estimate and replay shape" do
+    assert {:module, Capacity} = Code.ensure_loaded(Capacity)
     assert function_exported?(Capacity, :evaluate, 3)
     assert function_exported?(Capacity, :backtest, 3)
 

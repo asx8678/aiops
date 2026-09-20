@@ -2,18 +2,30 @@ defmodule OpsBrain.Collection do
   @moduledoc "One bounded outbound read per durable job. HTTP never runs inside a transaction. Leases are fenced."
   alias OpsBrain.{SourceConfig, Store, Repo, AzureBuild, Transport}
 
+  # Historical reconciliation is a durable backlog (run IDs re-fetched by id).
+  # It is drained one step at a time, alternating with current discovery, so a
+  # long backlog can never block new-run polling. The backlog is bounded; when
+  # it is full, coverage is reported partial rather than silently dropping.
+  @max_reconcile 100
+
   def tick(source_id, now \\ Store.now()) do
     with {:ok, c} <- SourceConfig.fetch(source_id),
          {:ok, {:claimed, state}} <- claim(source_id, now) do
       response =
         case state["mode"] do
-          "recent" -> AzureBuild.run(c, hd(state["reconcile_ids"]))
-          _ -> AzureBuild.list(c, state)
+          mode when mode in ["recent", "reconcile"] ->
+            case state["reconcile_ids"] do
+              [id | _] -> AzureBuild.run(c, id)
+              [] -> AzureBuild.list(c, state)
+            end
+
+          _ ->
+            AzureBuild.list(c, state)
         end
 
       case response do
-        {:ok, r} -> accept(c, state, r, now)
-        {:error, reason} -> fail(c, state, reason, now, 60)
+        {:ok, r} -> accept(c, state, r, Store.now())
+        {:error, reason} -> fail(c, state, reason, Store.now(), 60)
       end
     else
       {:ok, :busy} -> {:snooze, 30}
@@ -68,7 +80,7 @@ defmodule OpsBrain.Collection do
     delay = max(c.interval_seconds, Transport.retry_seconds(r.headers, now))
 
     decoded =
-      if state["mode"] == "recent" and r.status == 200 do
+      if state["mode"] in ["recent", "reconcile"] and r.status == 200 do
         with {:ok, raw} <- Jason.decode(r.body),
              {:ok, normalized} <- AzureBuild.normalize(c, raw),
              true <- normalized["run_id"] == hd(state["reconcile_ids"]) do
@@ -142,31 +154,33 @@ defmodule OpsBrain.Collection do
     else
       case s["mode"] do
         "completed" ->
-          {"active", [], "complete", s["window_end"], s["window_start"], s["window_end"], 0}
+          {"active", s["reconcile_ids"], "complete", s["window_end"], s["window_start"],
+           s["window_end"], 0}
 
         "active" ->
           ids =
             Store.rows(
-              "SELECT run_id FROM pipeline_runs WHERE source_id=$1::text::uuid ORDER BY received_at DESC LIMIT 100",
+              "SELECT run_id FROM pipeline_runs WHERE source_id=$1::text::uuid ORDER BY received_at DESC,run_id DESC LIMIT 100",
               [c.id]
             )
             |> Enum.map(& &1["run_id"])
 
-          if ids == [],
+          backlog = if s["reconcile_ids"] == [], do: ids, else: s["reconcile_ids"]
+
+          if backlog == [],
             do: {"completed", [], "complete", s["completed_at"], nil, nil, 0},
             else:
-              {"recent", ids, "complete", s["completed_at"], s["window_start"], s["window_end"],
-               0}
+              {"reconcile", backlog,
+               if(length(backlog) >= @max_reconcile, do: "partial", else: "complete"),
+               s["completed_at"], nil, nil, 0}
 
-        "recent" ->
-          case tl(s["reconcile_ids"]) do
-            [] ->
-              {"completed", [], "complete", s["completed_at"], nil, nil, 0}
+        mode when mode in ["recent", "reconcile"] ->
+          # Exactly one reconciliation per phase; current discovery gets the next
+          # tick, so a large backlog is drained between discovery polls.
+          rest = tl(s["reconcile_ids"])
 
-            ids ->
-              {"recent", ids, "complete", s["completed_at"], s["window_start"], s["window_end"],
-               0}
-          end
+          {"completed", rest, if(rest == [], do: "complete", else: "partial"), s["completed_at"],
+           nil, nil, 0}
       end
     end
   end
@@ -244,16 +258,35 @@ defmodule OpsBrain.Collection do
   end
 
   defp fail(c, s, reason, now, delay) do
-    SourceConfig.transaction(c.id, fn trusted ->
-      fenced!(trusted, s, now)
+    # Yield to discovery without discarding failed historical work. Rotate the
+    # ID to the tail for another bounded attempt; errors remain visibly partial.
+    {mode, ids, coverage} =
+      cond do
+        s["mode"] in ["recent", "reconcile"] ->
+          ids = s["reconcile_ids"]
+          rotated = if ids == [], do: [], else: tl(ids) ++ [hd(ids)]
+          {"completed", rotated, "partial"}
 
-      Repo.query!(
-        "UPDATE collection_states SET lease_until=NULL,next_at=$2,error=$3,coverage='partial',requests=requests+1 WHERE source_id=$1::text::uuid",
-        [c.id, DateTime.add(now, max(30, delay)), Atom.to_string(reason)]
-      )
+        true ->
+          {s["mode"], s["reconcile_ids"], "partial"}
+      end
 
-      {:error, reason}
-    end)
+    result =
+      SourceConfig.transaction(c.id, fn trusted ->
+        fenced!(trusted, s, now)
+
+        Repo.query!(
+          "UPDATE collection_states SET lease_until=NULL,next_at=$2,error=$3,coverage=$4,mode=$5,reconcile_ids=$6,requests=requests+1 WHERE source_id=$1::text::uuid",
+          [c.id, DateTime.add(now, max(30, delay)), Atom.to_string(reason), coverage, mode, ids]
+        )
+
+        :recorded
+      end)
+
+    case result do
+      {:ok, :recorded} -> {:source_failure, reason}
+      {:error, _} = error -> error
+    end
   end
 
   def summary(scope, source_id) do

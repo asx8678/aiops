@@ -7,6 +7,7 @@ defmodule OpsBrain.SourceConfig do
   def fetch(id) do
     with true <- is_binary(id),
          {:ok, c} <- Map.fetch(all(), id),
+         c = normalize(c),
          :ok <- validate(c),
          true <- c.id == id do
       {:ok, c}
@@ -14,6 +15,10 @@ defmodule OpsBrain.SourceConfig do
       _ -> {:error, :source_disabled_or_invalid}
     end
   end
+
+  # R15: one persisted default. Omitted Kubernetes resources mean pods.
+  defp normalize(%{kind: "kubernetes"} = c), do: Map.put_new(c, :resources, ["pods"])
+  defp normalize(c), do: c
 
   def validate(c) when is_map(c) do
     uri = URI.parse(c[:endpoint] || "")

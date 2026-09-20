@@ -196,6 +196,20 @@ defmodule OpsBrain.Notifications do
     end
   end
 
+  @doc "Scoped local notification state for a finding. Never exposes global Oban arguments."
+  def status(scope, group_id) do
+    with {:ok, _} <- Ecto.UUID.cast(group_id) do
+      OpsBrain.Tenancy.with_scope(scope, fn ->
+        Store.rows(
+          "SELECT id::text,destination,status,attempts,next_at,updated_at FROM notification_outbox WHERE group_id=$1::text::uuid ORDER BY updated_at DESC,id DESC LIMIT 20",
+          [group_id]
+        )
+      end)
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
   defp send_message(row, sink) do
     uri = URI.parse(sink.url)
 

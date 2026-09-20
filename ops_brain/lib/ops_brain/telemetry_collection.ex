@@ -2,17 +2,64 @@ defmodule OpsBrain.TelemetryCollection do
   @moduledoc "Fixed, revisable metric/log windows and persisted detector outputs; no rolling sums."
   alias OpsBrain.{SourceConfig, Store, Repo, Evidence, Fingerprints, Issues}
 
-  def tick(id, now \\ Store.now()) do
-    with {:ok, c} <- SourceConfig.fetch(id), {:ok, {fence, finish}} <- claim(id, now) do
-      start = DateTime.add(finish, -60)
+  # Backfill advances contiguously from the durable checkpoint, up to this many
+  # one-minute windows per tick. When it cannot keep up, coverage is reported as
+  # catching_up and the next attempt is requeued after five seconds (subject to the
+  # shared source request budget) instead of pretending the gap is complete.
+  @catchup_batch 1
 
-      response =
-        case c.kind do
-          "prometheus" -> OpsBrain.Metrics.collect(c, finish)
-          "loki" -> OpsBrain.Logs.collect(c, start, finish)
-          "kubernetes" -> OpsBrain.Kubernetes.reconcile(c, now, fence)
+  def tick(id, now \\ Store.now()) do
+    with {:ok, c} <- SourceConfig.fetch(id),
+         {:ok, {:claimed, fence, windows}} <- claim(id, now) do
+      run_windows(c, id, fence, windows, now)
+    else
+      {:error, :busy} -> {:snooze, 30}
+      error -> error
+    end
+  end
+
+  defp run_windows(c, id, fence, windows, now) do
+    result =
+      Enum.reduce_while(windows, {:ok, nil}, fn {start, finish}, _acc ->
+        case collect(c, start, finish, now, fence) do
+          {:ok, data} ->
+            case persist_window(id, c, fence, start, finish, data, now) do
+              {:ok, stored} -> {:cont, {:ok, stored}}
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+      end)
+
+    case result do
+      {:ok, stored} ->
+        case finish_state(c, id, fence, now, nil) do
+          {:ok, :catching_up} -> {:snooze, 5}
+          {:ok, :finished} -> {:ok, stored}
+          error -> error
         end
 
+      {:error, reason} ->
+        case finish_state(c, id, fence, now, to_string(reason)) do
+          {:ok, _} -> {:ok, {:error, :invalid_or_unavailable_response}}
+          error -> error
+        end
+    end
+  end
+
+  defp collect(%{kind: "kubernetes"} = c, _start, _finish, now, fence),
+    do: OpsBrain.Kubernetes.reconcile(c, now, fence)
+
+  defp collect(%{kind: "prometheus"} = c, _start, finish, _now, _fence),
+    do: OpsBrain.Metrics.collect(c, finish)
+
+  defp collect(%{kind: "loki"} = c, start, finish, _now, _fence),
+    do: OpsBrain.Logs.collect(c, start, finish)
+
+  defp persist_window(id, c, fence, start, finish, data, now) do
+    result =
       SourceConfig.transaction(id, fn trusted ->
         s =
           Store.one(
@@ -23,38 +70,80 @@ defmodule OpsBrain.TelemetryCollection do
         if s["fence"] != fence or DateTime.compare(s["lease_until"], Store.now()) == :lt,
           do: Repo.rollback(:stale_lease)
 
-        case response do
-          {:ok, data} ->
-            data =
-              if c.kind == "kubernetes" and is_list(c[:resources]),
-                do: OpsBrain.WorkloadCollection.persist(trusted, data, now, fence),
-                else: data
+        data =
+          if c.kind == "kubernetes" and is_list(c[:resources]),
+            do: OpsBrain.WorkloadCollection.persist(trusted, data, now, fence),
+            else: data
 
-            stored = persist(trusted, start, finish, data, now)
+        stored = persist(trusted, start, finish, data, now)
 
-            Repo.query!(
-              "UPDATE collection_states SET lease_until=NULL,next_at=$2,last_success_at=CASE WHEN $6::text IS NULL THEN $3 ELSE last_success_at END,completed_at=GREATEST(completed_at,$4),coverage=$5,error=$6 WHERE source_id=$1::text::uuid",
-              [
-                id,
-                DateTime.add(now, c.interval_seconds),
-                now,
-                finish,
-                stored["coverage"] || "partial",
-                data["source_error"]
-              ]
+        error =
+          data["source_error"] ||
+            if(c.kind != "kubernetes" and stored["coverage"] != "complete",
+              do: "incomplete_observation",
+              else: nil
             )
 
-          {:error, reason} ->
-            Repo.query!(
-              "UPDATE collection_states SET lease_until=NULL,next_at=$2,coverage='partial',error=$3 WHERE source_id=$1::text::uuid",
-              [id, DateTime.add(now, c.interval_seconds), to_string(reason)]
-            )
-        end
+        Repo.query!(
+          """
+          UPDATE collection_states SET
+          last_success_at=CASE WHEN $4::text IS NULL THEN $2 ELSE last_success_at END,
+          completed_at=CASE WHEN $4::text IS NULL THEN GREATEST(COALESCE(completed_at,$3),$3) ELSE completed_at END,
+          coverage=$5,error=$4,requests=requests+1 WHERE source_id=$1::text::uuid
+          """,
+          [id, now, finish, error, stored["coverage"] || "partial"]
+        )
+
+        if error,
+          do: {:error, error},
+          else: {:ok, stored}
       end)
-    else
-      {:error, :busy} -> {:snooze, 30}
-      error -> error
+
+    case result do
+      {:ok, {:ok, stored}} -> {:ok, stored}
+      {:ok, {:error, reason}} -> {:error, reason}
+      other -> other
     end
+  end
+
+  defp finish_state(c, id, fence, now, error) do
+    SourceConfig.transaction(id, fn _ ->
+      s =
+        Store.one(
+          "SELECT fence,lease_until,completed_at,coverage FROM collection_states WHERE source_id=$1::text::uuid FOR UPDATE",
+          [id]
+        )
+
+      if s["fence"] != fence or is_nil(s["lease_until"]) or
+           DateTime.compare(s["lease_until"], Store.now()) != :gt,
+         do: Repo.rollback(:stale_lease)
+
+      closed = closed_minute(now)
+
+      coverage =
+        cond do
+          error != nil -> "partial"
+          s["coverage"] in ["partial", "capped_or_saturated", "not_configured"] -> s["coverage"]
+          s["completed_at"] == nil -> "partial"
+          DateTime.compare(s["completed_at"], closed) == :lt -> "catching_up"
+          true -> "complete"
+        end
+
+      delay =
+        cond do
+          error != nil -> max(c.interval_seconds, 30)
+          coverage == "complete" -> c.interval_seconds
+          c.kind == "kubernetes" -> c.interval_seconds
+          true -> 5
+        end
+
+      Repo.query!(
+        "UPDATE collection_states SET lease_until=NULL,next_at=$2,coverage=$3,error=$4 WHERE source_id=$1::text::uuid",
+        [id, DateTime.add(now, delay), coverage, error]
+      )
+
+      if coverage == "catching_up", do: :catching_up, else: :finished
+    end)
   end
 
   defp claim(id, now) do
@@ -72,32 +161,53 @@ defmodule OpsBrain.TelemetryCollection do
       if Enum.any?([s["next_at"], s["lease_until"]], &(&1 && DateTime.compare(&1, now) == :gt)),
         do: Repo.rollback(:busy)
 
+      fence = s["fence"] + 1
+
       Repo.query!(
-        "UPDATE collection_states SET fence=fence+1,lease_until=$2,requests=requests+1 WHERE source_id=$1::text::uuid",
-        [id, DateTime.add(now, 45)]
+        "UPDATE collection_states SET fence=$2,lease_until=$3,requests=requests+1 WHERE source_id=$1::text::uuid",
+        [id, fence, DateTime.add(now, 45)]
       )
 
-      closed = DateTime.from_unix!(div(DateTime.to_unix(now), 60) * 60)
-
-      finish =
-        cond do
-          c.kind == "kubernetes" ->
-            closed
-
-          s["completed_at"] == nil ->
-            closed
-
-          DateTime.compare(s["completed_at"], closed) == :lt ->
-            Enum.min_by([DateTime.add(s["completed_at"], 60), closed], &DateTime.to_unix/1)
-
-          true ->
-            DateTime.add(closed, -60)
-        end
-
-      # New closed windows always take priority. Reconcile the prior one only when caught up.
-      {s["fence"] + 1, finish}
+      {:claimed, fence, windows_for(c, s, now)}
     end)
   end
+
+  defp windows_for(%{kind: "kubernetes"}, _s, now) do
+    closed = closed_minute(now)
+    [{DateTime.add(closed, -60), closed}]
+  end
+
+  defp windows_for(_c, s, now) do
+    closed = closed_minute(now)
+
+    start =
+      case s["completed_at"] do
+        nil -> DateTime.add(closed, -60)
+        completed -> completed
+      end
+
+    contiguous(start, closed)
+  end
+
+  defp contiguous(start, closed) do
+    windows =
+      Stream.unfold(start, fn s ->
+        if DateTime.compare(s, closed) == :lt do
+          f = DateTime.add(s, 60)
+          {{s, f}, f}
+        else
+          nil
+        end
+      end)
+      |> Enum.take(@catchup_batch)
+
+    case windows do
+      [] -> [{DateTime.add(closed, -120), DateTime.add(closed, -60)}]
+      _ -> windows
+    end
+  end
+
+  defp closed_minute(now), do: DateTime.from_unix!(div(DateTime.to_unix(now), 60) * 60)
 
   def persist(c, start, finish, data, now) do
     data =
@@ -164,7 +274,6 @@ defmodule OpsBrain.TelemetryCollection do
       Evidence.save(c, "window:#{row["id"]}:#{row["revision"]}", c.kind, data, finish, now)
 
     if service && data["condition"] in ["warning", "critical", "watch"] do
-      # Require a second disjoint breached window; a revised sample is not persistence.
       prior =
         Store.one(
           "SELECT id FROM observation_windows WHERE source_id=$1::text::uuid AND profile=$2 AND window_end=$3 AND data->>'condition' IN ('warning','critical','watch')",
@@ -222,7 +331,6 @@ defmodule OpsBrain.TelemetryCollection do
     end
 
     if c.kind == "loki" and service do
-      # One membership per signature/window, with explicit sample basis; never a total signature count.
       (data["samples"] || [])
       |> Enum.group_by(&Fingerprints.normalize(&1["message"]))
       |> Enum.take(20)

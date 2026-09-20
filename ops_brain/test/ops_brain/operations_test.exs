@@ -309,7 +309,7 @@ defmodule OpsBrain.OperationsTest do
     Application.put_env(:ops_brain, :notification_plug, fn _ -> raise "replay delivered" end)
     assert {:ok, [_]} = Replay.fingerprints(f.scope_a, DateTime.add(f.now, 1))
     assert {:error, :parser_version_unavailable} = Replay.fingerprints(f.scope_a, f.now, 999)
-    assert {:ok, 1} = Replay.expire(f.scope_a, DateTime.add(f.now, 8, :day))
+    assert {:ok, 1} = OpsBrain.Retention.expire_evidence(f.scope_a, DateTime.add(f.now, 8, :day))
 
     assert {:ok, [%{status: "expired: exact replay unavailable"}]} =
              Replay.fingerprints(f.scope_a, DateTime.add(f.now, 1))

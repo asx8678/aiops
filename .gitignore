@@ -1,2 +1,6 @@
 .DS_Store
 .pi/
+
+# Python bytecode from release contract checks.
+__pycache__/
+*.pyc

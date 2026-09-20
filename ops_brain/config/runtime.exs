@@ -24,6 +24,9 @@ config :ops_brain, :oidc,
   client_secret: "OPS_BRAIN_OIDC_CLIENT_SECRET",
   subjects: "OPS_BRAIN_OIDC_SUBJECTS"
 
+# Optional bounded console export of application metrics; off by default.
+config :ops_brain, :metrics_console, System.get_env("OPS_BRAIN_METRICS_CONSOLE") == "true"
+
 if System.get_env("PHX_SERVER") == "true" do
   config :ops_brain, OpsBrainWeb.Endpoint, server: true
 end
@@ -32,6 +35,13 @@ config :ops_brain, OpsBrainWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
 if config_env() == :prod do
+  bind =
+    case System.get_env("HTTP_BIND", "127.0.0.1") do
+      "127.0.0.1" -> {127, 0, 0, 1}
+      "0.0.0.0" -> {0, 0, 0, 0}
+      _ -> raise "HTTP_BIND must be 127.0.0.1 or 0.0.0.0"
+    end
+
   config :ops_brain, OpsBrain.Repo,
     url: System.fetch_env!("DATABASE_URL"),
     ssl: [verify: :verify_peer, cacertfile: System.fetch_env!("DATABASE_CA_FILE")],
@@ -39,7 +49,7 @@ if config_env() == :prod do
 
   config :ops_brain, OpsBrainWeb.Endpoint,
     url: [host: System.fetch_env!("PHX_HOST"), port: 443, scheme: "https"],
-    http: [ip: {127, 0, 0, 1}],
+    http: [ip: bind],
     secret_key_base: System.fetch_env!("SECRET_KEY_BASE")
 else
   database = if config_env() == :test, do: "ops_brain_test", else: "ops_brain_dev"

@@ -17,8 +17,6 @@
 !priv/static/
 !priv/static/**
 !rel/
-!rel/container.runtime.exs
-!rel/container.prod.exs
 !rel/env.sh.eex
 !rel/overlays/
 !rel/overlays/**

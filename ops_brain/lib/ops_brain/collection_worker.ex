@@ -8,6 +8,11 @@ defmodule OpsBrain.CollectionWorker do
       states: [:available, :scheduled, :executing, :retryable]
     ]
 
+  alias OpsBrain.Outcome
+
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(5)
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"source_id" => id}}) do
     if Application.get_env(:ops_brain, :collection_enabled, false) do
@@ -18,14 +23,17 @@ defmodule OpsBrain.CollectionWorker do
   end
 
   defp collect(id) do
-    case OpsBrain.SourceConfig.fetch(id) do
-      {:ok, %{kind: "azure_build"}} -> normalize(OpsBrain.Collection.tick(id))
-      {:ok, _} -> normalize(OpsBrain.TelemetryCollection.tick(id))
-      _ -> :discard
-    end
+    id
+    |> dispatch()
+    |> Outcome.normalize()
+    |> Outcome.to_oban()
   end
 
-  defp normalize({:ok, _}), do: :ok
-  defp normalize({:snooze, n}), do: {:snooze, n}
-  defp normalize(_), do: {:error, :collection_failed}
+  defp dispatch(id) do
+    case OpsBrain.SourceConfig.fetch(id) do
+      {:ok, %{kind: "azure_build"}} -> OpsBrain.Collection.tick(id)
+      {:ok, _} -> OpsBrain.TelemetryCollection.tick(id)
+      _ -> {:error, :source_disabled_or_invalid}
+    end
+  end
 end

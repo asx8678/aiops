@@ -19,12 +19,9 @@ RUN mix deps.get --only prod && mix deps.compile
 COPY lib lib
 COPY priv priv
 COPY rel rel
-# Image-only addition; repository config stays untouched. See DEPLOYMENT.md.
-RUN printf '\n' >> config/prod.exs \
-    && cat rel/container.prod.exs >> config/prod.exs \
-    && printf '\n' >> config/runtime.exs \
-    && cat rel/container.runtime.exs >> config/runtime.exs \
-    && mix compile --warnings-as-errors \
+# Production behavior lives in the shared config/ files; no in-image source
+# concatenation. See docs/DEPLOYMENT.md.
+RUN mix compile --warnings-as-errors \
     && mix phx.digest \
     && mix release \
     && chmod 0555 _build/prod/rel/ops_brain/bin/release-command \

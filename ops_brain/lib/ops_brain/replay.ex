@@ -153,21 +153,6 @@ defmodule OpsBrain.Replay do
     end
   end
 
-  @doc "Legacy explicit maintenance API (not replay). Preserves evidence identity and occurrence counts."
-  def expire(scope, now \\ Store.now()) do
-    Tenancy.with_scope(scope, fn ->
-      Repo.query!(
-        """
-        WITH candidates AS MATERIALIZED (SELECT id FROM evidence_items WHERE expires_at <= $1
-          AND NOT(data ? 'expired') ORDER BY expires_at,id LIMIT 500 FOR UPDATE SKIP LOCKED)
-        UPDATE evidence_items SET data='{"expired":true,"reason":"retention"}'::jsonb
-        WHERE id IN (SELECT id FROM candidates)
-        """,
-        [now]
-      ).num_rows
-    end)
-  end
-
   defp read_scope(scope, fun) do
     Tenancy.with_scope(scope, fn ->
       Repo.query!("SET LOCAL statement_timeout = '5s'")

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ops_brain
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MIX_ENV: test
+      OPS_BRAIN_DISPOSABLE_TEST: "true"
+      DATABASE_URL: ecto://ops_brain_runtime:runtime_pw@localhost:5432/ops_brain_test
+      MIGRATION_DATABASE_URL: ecto://ops_brain_migrator:migrator_pw@localhost:5432/ops_brain_test
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+      - name: Install locked toolchain
+        run: mise install
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ops_brain/deps
+            ops_brain/_build
+          key: ${{ runner.os }}-mix-${{ hashFiles('ops_brain/mix.lock', 'ops_brain/mise.toml') }}
+      - name: Resolve locked dependencies
+        run: mise exec -- mix deps.get
+      - name: Provision disposable database identities
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE ops_brain_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'migrator_pw';
+          CREATE ROLE ops_brain_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'runtime_pw';
+          CREATE DATABASE ops_brain_test OWNER ops_brain_migrator;
+          ALTER DATABASE ops_brain_test SET ops_brain.disposable_test='approved';
+          SQL
+      - name: Migrate as the migrator identity
+        run: DATABASE_URL="$MIGRATION_DATABASE_URL" mise exec -- mix ecto.migrate
+      - name: Apply least-privilege runtime grants
+        run: psql "${MIGRATION_DATABASE_URL/ecto:/postgresql:}" -v ON_ERROR_STOP=1 -f priv/repo/runtime_grants.sql
+      - run: mise exec -- mix format --check-formatted
+      - run: mise exec -- mix compile --warnings-as-errors
+      - run: mise exec -- mix test
+      - run: MIX_ENV=prod mise exec -- mix compile --warnings-as-errors
+      - run: mise exec -- mix phx.routes
+      - run: mise exec -- mix ops_brain.validate_config config/sources.example.json
+      - run: mise exec -- mix ops_brain.validate_config config/sources.prepared.json
+      - name: Reject tracked source or lockfile mutations
+        run: git diff --exit-code -- . ../.github
+

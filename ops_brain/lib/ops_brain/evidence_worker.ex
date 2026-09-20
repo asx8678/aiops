@@ -6,6 +6,9 @@ defmodule OpsBrain.EvidenceWorker do
 
   alias OpsBrain.{AzureBuild, SourceConfig, Evidence, Store}
   @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(5)
+
+  @impl Oban.Worker
   def perform(%Oban.Job{args: %{"source_id" => id, "run_id" => run} = args}) do
     if Application.get_env(:ops_brain, :collection_enabled, false),
       do: collect(id, run, args),

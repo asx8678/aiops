@@ -15,11 +15,13 @@ defmodule OpsBrain.Scheduler do
 
   def handle_info({:maintenance, offset}, state) do
     if Application.get_env(:ops_brain, :maintenance_enabled, false) do
-      ids = OpsBrain.SourceConfig.all() |> Map.keys() |> Enum.sort()
+      # Persist configured policies first, then sweep every durable source with a
+      # known policy, including disabled or removed configuration entries.
+      OpsBrain.Retention.sync_from_config()
+      ids = OpsBrain.Retention.targets() |> Enum.sort()
 
       for id <- Enum.slice(ids, offset, 20) do
-        if match?({:ok, _}, OpsBrain.SourceConfig.fetch(id)),
-          do: Oban.insert(OpsBrain.MaintenanceWorker.new(%{source_id: id}))
+        Oban.insert(OpsBrain.MaintenanceWorker.new(%{source_id: id}))
       end
 
       Oban.insert(OpsBrain.DirectoryMaintenanceWorker.new(%{}))

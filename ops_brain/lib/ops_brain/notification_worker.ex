@@ -4,6 +4,8 @@ defmodule OpsBrain.NotificationWorker do
     max_attempts: 3,
     unique: [period: 300, fields: [:args, :worker]]
 
+  def timeout(_job), do: :timer.minutes(5)
+
   def perform(%Oban.Job{args: %{"source_id" => source, "id" => id}}) do
     case OpsBrain.Notifications.deliver(source, id) do
       {:ok, _} -> :ok
