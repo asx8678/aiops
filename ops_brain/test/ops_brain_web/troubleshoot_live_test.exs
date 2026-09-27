@@ -614,4 +614,116 @@ defmodule OpsBrainWeb.TroubleshootLiveTest do
              "#finding-#{group["id"]} a[href='/companies/#{f.a.id}/investigations?focus=#{group["id"]}#groups-#{group["id"]}']"
            )
   end
+
+  test "the service page does not inherit a cluster-prefix or CI-only finding", f do
+    env_staging = Enum.find(f.envs, &(&1.company_id == f.a.id and &1.name == :staging))
+
+    {:ok, _east_prod} =
+      Services.create(f.scope_a, %{
+        source_id: f.prom.id,
+        environment_id: env_staging.id,
+        service_key: "storage-prod",
+        target: "synthetic-east-prod/storage-prod"
+      })
+
+    Tenancy.with_scope(f.scope_a, fn ->
+      for {fp, data} <- [
+            {"exact-page",
+             %{"template" => "exact page finding", "scope" => "synthetic/storage-prod"}},
+            {"prefix-page",
+             %{
+               "template" => "prefix collision finding",
+               "scope" => "synthetic-east-prod/storage-prod"
+             }},
+            {"ci-page",
+             %{
+               "template" => "ci only finding",
+               "scope" => "synthetic/storage-prod",
+               "prediction_target" => nil
+             }}
+          ] do
+        Repo.query!(
+          "INSERT INTO error_fingerprints(company_id,source_id,fingerprint,parser_version,data) VALUES($1::text::uuid,$2::text::uuid,$3,1,$4)",
+          [f.a.id, f.prom.id, fp, %{"template" => data["template"]}]
+        )
+
+        Repo.query!(
+          "INSERT INTO issue_groups(id,company_id,source_id,fingerprint,parser_version,first_seen,last_seen,severity,data) VALUES($1::text::uuid,$2::text::uuid,$3::text::uuid,$4,1,$5,$5,'critical',$6)",
+          [Ecto.UUID.generate(), f.a.id, f.prom.id, fp, f.now, data]
+        )
+      end
+    end)
+
+    {:ok, _view, prod} =
+      live(f.conn, "/companies/#{f.a.id}/troubleshoot?service=storage-prod&environment=prod")
+
+    assert prod =~ "exact page finding"
+    refute prod =~ "prefix collision finding"
+    refute prod =~ "ci only finding"
+
+    {:ok, _staging_view, staging} =
+      live(f.conn, "/companies/#{f.a.id}/troubleshoot?service=storage-prod&environment=staging")
+
+    assert staging =~ "prefix collision finding"
+    assert staging =~ "synthetic-east-prod/storage-prod"
+    refute staging =~ "exact page finding"
+    refute staging =~ "ci only finding"
+  end
+
+  test "newer windows from another service do not hide this service metric", f do
+    env = Enum.find(f.envs, &(&1.company_id == f.a.id and &1.name == :prod))
+
+    {:ok, other} =
+      Services.create(f.scope_a, %{
+        source_id: f.prom.id,
+        environment_id: env.id,
+        service_key: "noise",
+        target: "synthetic/noise"
+      })
+
+    Tenancy.with_scope(f.scope_a, fn ->
+      metric_end = DateTime.add(f.now, -7200, :second)
+
+      Repo.query!(
+        "INSERT INTO observation_windows(id,company_id,source_id,service_id,profile,kind,window_start,window_end,received_at,data) VALUES(gen_random_uuid(),$1::text::uuid,$2::text::uuid,$3::text::uuid,'metric:selected','metric',$4,$5,$5,$6)",
+        [
+          f.a.id,
+          f.prom.id,
+          f.service_id,
+          DateTime.add(metric_end, -60, :second),
+          metric_end,
+          %{
+            "condition" => "warning",
+            "cpu_percent" => 17,
+            "memory_percent" => 40,
+            "p95_latency_ms" => 80
+          }
+        ]
+      )
+
+      for n <- 1..101 do
+        at = DateTime.add(f.now, -n, :second)
+
+        Repo.query!(
+          "INSERT INTO observation_windows(id,company_id,source_id,service_id,profile,kind,window_start,window_end,received_at,data) VALUES(gen_random_uuid(),$1::text::uuid,$2::text::uuid,$3::text::uuid,$4,'metric',$5,$6,$6,$7)",
+          [
+            f.a.id,
+            f.prom.id,
+            other["id"],
+            "noise:#{n}",
+            DateTime.add(at, -30, :second),
+            at,
+            %{"condition" => "critical", "cpu_percent" => 99}
+          ]
+        )
+      end
+    end)
+
+    {:ok, view, html} =
+      live(f.conn, "/companies/#{f.a.id}/troubleshoot?service=storage-prod&environment=prod")
+
+    assert has_element?(view, "#metrics")
+    assert html =~ "17%"
+    refute html =~ "99%"
+  end
 end

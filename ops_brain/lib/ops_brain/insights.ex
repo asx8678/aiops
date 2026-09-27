@@ -219,37 +219,18 @@ defmodule OpsBrain.Insights do
            ) ||
              {:error, :not_found},
          {:ok, groups} <- Issues.list(scope),
-         {:ok, windows} <- Services.windows(scope),
+         {:ok, windows} <- Services.service_windows(scope, instance["id"]),
          {:ok, sources} <- Services.sources(scope, now),
-         {:ok, rows} <- service_rows(scope, instance, service_key, now) do
+         {:ok, rows} <- service_rows(scope, instance, service_key, now),
+         {:ok, target_ambiguous?} <- target_shared?(scope, instance["target"], environment) do
       windows = Enum.filter(windows, &(&1["service_id"] == instance["id"]))
       metric = Enum.find(windows, &(&1["kind"] == "metric"))
       capacity = Enum.find(windows, &(&1["kind"] == "capacity"))
       cluster = cluster(instance["target"])
-      scope_marker = "/#{service_key}"
 
       findings =
         groups
-        |> Enum.filter(fn g ->
-          prediction_target = g["data"]["prediction_target"]
-
-          cond do
-            is_map(prediction_target) ->
-              # worker-created predictions match by exact instance/environment
-              prediction_target["service_instance_id"] == instance["id"] and
-                prediction_target["environment"] == environment
-
-            Map.has_key?(g["data"], "prediction_target") ->
-              # explicitly unscoped prediction (CI-only): never on a service page
-              false
-
-            true ->
-              scope_text = get_in(g, ["data", "scope"]) || ""
-
-              String.ends_with?(scope_text, scope_marker) and
-                String.contains?(scope_text, cluster)
-          end
-        end)
+        |> Enum.filter(&service_finding?(&1, instance, environment, target_ambiguous?))
         |> Enum.map(fn g -> Map.put(g, "correlation", rows.correlations[g["id"]]) end)
 
       storage =
@@ -1527,6 +1508,79 @@ defmodule OpsBrain.Insights do
   defp runtime_prefix(service, _cluster) when is_binary(service), do: service
   defp runtime_prefix(_, cluster) when is_binary(cluster), do: cluster
   defp runtime_prefix(_, _), do: "unmapped"
+
+  # Service pages use the same boundaries as command-center provenance, plus
+  # the selected instance. Structured predictions match instance id and
+  # environment. An explicit nil prediction_target is CI-only and stays off
+  # every service page. Collector findings carry the instance id. Legacy and
+  # demo scopes must equal that instance's target — demo keeps its "DEMO · "
+  # prefix — and a target shared across environments is not assigned to the
+  # selected page. That check is an exact-target query, not the capped
+  # service overview. Cluster substrings never match.
+  @demo_scope_prefix "DEMO · "
+
+  # Distinct environments for this exact target, bounded to two rows: one
+  # means the selected environment owns it; two means it is ambiguous. The
+  # service overview page is capped at 100 and must not hide the other copy.
+  defp target_shared?(scope, target, environment) when is_binary(target) do
+    with {:ok, rows} <-
+           Tenancy.with_scope(scope, fn ->
+             Store.rows(
+               """
+               SELECT DISTINCT e.name::text AS environment
+               FROM service_instances s
+               JOIN environments e ON e.id=s.environment_id AND e.company_id=s.company_id
+               WHERE s.company_id=$2::text::uuid AND s.target=$1
+               LIMIT 2
+               """,
+               [target, scope.company_id]
+             )
+           end) do
+      {:ok, Enum.map(rows, & &1["environment"]) != [environment]}
+    end
+  end
+
+  defp target_shared?(_scope, _target, _environment), do: {:ok, true}
+
+  defp service_finding?(%{"data" => data}, instance, environment, target_ambiguous?)
+       when is_map(data) do
+    prediction_target = data["prediction_target"]
+
+    cond do
+      is_map(prediction_target) ->
+        prediction_target["service_instance_id"] == instance["id"] and
+          prediction_target["environment"] == environment
+
+      Map.has_key?(data, "prediction_target") ->
+        false
+
+      true ->
+        legacy_scope_for_instance?(data["scope"], instance, environment, target_ambiguous?)
+    end
+  end
+
+  defp service_finding?(_, _, _, _), do: false
+
+  defp legacy_scope_for_instance?(scope, instance, environment, target_ambiguous?)
+       when is_binary(scope) do
+    target = instance["target"]
+    service_key = instance["service_key"]
+
+    cond do
+      scope == instance["id"] and instance["environment"] == environment ->
+        true
+
+      is_binary(target) and is_binary(service_key) and
+        (scope == target or scope == @demo_scope_prefix <> target) and
+          (target == service_key or String.ends_with?(target, "/" <> service_key)) ->
+        not target_ambiguous? and instance["environment"] == environment
+
+      true ->
+        false
+    end
+  end
+
+  defp legacy_scope_for_instance?(_, _, _, _), do: false
 
   # Finding provenance resolves against the FULL authorized identity set.
   # A worker-created prediction carries its exact structured target: the

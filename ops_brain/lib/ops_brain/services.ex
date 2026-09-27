@@ -48,6 +48,30 @@ defmodule OpsBrain.Services do
     end)
   end
 
+  @doc """
+  Latest bounded windows for one authorized service. The exact service id is
+  applied before LIMIT, so newer windows from other services cannot crowd it
+  out. The company-wide windows/2 page is unchanged.
+  """
+  def service_windows(scope, service_id) do
+    with {:ok, service_id} <- Ecto.UUID.cast(service_id) do
+      Tenancy.with_scope(scope, fn ->
+        Store.rows(
+          """
+          SELECT id::text,service_id::text,kind,profile,window_start,window_end,received_at,revision,data
+          FROM observation_windows
+          WHERE company_id=$1::text::uuid AND service_id=$2::text::uuid
+          ORDER BY window_end DESC, id DESC
+          LIMIT 100
+          """,
+          [scope.company_id, service_id]
+        )
+      end)
+    else
+      :error -> {:error, :not_found}
+    end
+  end
+
   @doc "Unexpired stored capacity results. Environment selection precedes the bounded page."
   def capacity_evaluations(scope, environment \\ "", now \\ Store.now()) do
     if environment in ["", "dev", "staging", "prod"] do
