@@ -64,6 +64,8 @@ defmodule OpsBrainWeb.OperationsLiveTest do
       view |> element("#refresh-operations") |> render_click()
       sql = Enum.join(queries(), "\n")
       assert sql =~ expected
+      if area == "capacity", do: assert(sql =~ "e.kind='capacity_evaluation'")
+      if area == "services", do: refute(sql =~ "e.kind='capacity_evaluation'")
       for table <- forbidden, do: refute(sql =~ table)
       refute has_element?(view, "#evidence")
     end
@@ -109,13 +111,23 @@ defmodule OpsBrainWeb.OperationsLiveTest do
     assert {:error, :not_found} = Notifications.status(f.scope_a, "bad-id")
     conn = Plug.Test.init_test_session(build_conn(), %{operator_token: f.token_a})
     {:ok, view, _} = live(conn, "/companies/#{f.a.id}/investigations")
-    view |> element("#assign-#{id}") |> render_submit(%{"owner" => "operator-one"})
+    view |> form("#assign-#{id}", %{"owner" => "operator-one"}) |> render_submit()
     assert has_element?(view, "#groups-#{id}", "operator-one")
-    render_click(view, "snooze", %{"id" => id})
+    view |> element("#snooze-#{id}") |> render_click()
     assert {:ok, [%{"snoozed_until" => %DateTime{}}]} = Issues.list(f.scope_a)
-    render_click(view, "review", %{"id" => id, "status" => "locally_acknowledged"})
+
+    view
+    |> element("#groups-#{id} button[phx-value-status=locally_acknowledged]")
+    |> render_click()
+
     assert has_element?(view, "#groups-#{id}", "locally_acknowledged")
-    render_click(view, "review", %{"id" => id, "status" => "bogus"})
+
+    render_click(view, "review", %{
+      "id" => id,
+      "status" => "bogus",
+      "revision" => issue_revision(f.scope_a, id)
+    })
+
     assert has_element?(view, "#flash-error", "Review could not be saved")
     render_click(view, "evidence", %{"id" => id})
     assert has_element?(view, "#evidence-revisions", "current")
@@ -229,5 +241,89 @@ defmodule OpsBrainWeb.OperationsLiveTest do
 
     render_click(view, "refresh", %{})
     assert_redirect(view, "/sign-in")
+  end
+
+  test "focus deep link opens the finding's evidence and anchors its card", f do
+    {_c, group} = seed_finding(f)
+    id = group["id"]
+
+    conn = Plug.Test.init_test_session(build_conn(), %{operator_token: f.token_a})
+    {:ok, view, html} = live(conn, "/companies/#{f.a.id}/investigations?focus=#{id}")
+
+    # the finding card is the link target: the #groups-<id> fragment anchor
+    # exists on the page as the streamed card's own id
+    assert has_element?(view, "#groups-#{id}")
+
+    # the evidence workspace opens for exactly that finding
+    assert has_element?(view, "#evidence")
+    assert html =~ "Finding #{id}"
+    assert html =~ "HTTP 401 api.invalid"
+  end
+
+  test "a nonexistent focus id is ignored without crashing or leaking", f do
+    {_c, group} = seed_finding(f)
+
+    conn = Plug.Test.init_test_session(build_conn(), %{operator_token: f.token_a})
+
+    {:ok, view, _html} =
+      live(conn, "/companies/#{f.a.id}/investigations?focus=#{Ecto.UUID.generate()}")
+
+    # the page renders normally with its own findings; no evidence opens and
+    # nothing hints at whether any other group exists
+    assert has_element?(view, "#investigations")
+    assert has_element?(view, "#groups-#{group["id"]}")
+    refute has_element?(view, "#evidence")
+  end
+
+  test "another company's focus id never opens evidence or leaks its data", f do
+    {_c, group} = seed_finding(f)
+
+    cb = OpsBrain.SourceFixtures.config(f, :b)
+
+    {:ok, _} =
+      SourceConfig.transaction(cb.id, fn trusted ->
+        OpsBrain.Evidence.failure(
+          trusted,
+          "foreign-failure",
+          %{"issues" => ["SECRET COMPANY B PAYLOAD"], "tool" => "compiler", "attempt" => 1},
+          9,
+          Store.now()
+        )
+      end)
+
+    {:ok, [foreign]} = Issues.list(f.scope_b)
+
+    conn = Plug.Test.init_test_session(build_conn(), %{operator_token: f.token_a})
+    {:ok, view, html} = live(conn, "/companies/#{f.a.id}/investigations?focus=#{foreign["id"]}")
+
+    # the foreign id is not a member of company A's visible findings: nothing
+    # opens and company B's content never renders
+    refute has_element?(view, "#evidence")
+    refute html =~ "SECRET COMPANY B PAYLOAD"
+    assert has_element?(view, "#groups-#{group["id"]}")
+  end
+
+  test "focus respects the bounded findings page: a group beyond it never opens", f do
+    {_c, group} = seed_finding(f)
+
+    # 150 newer same-shaped groups push the focused one off the first page
+    {:ok, _} =
+      Tenancy.with_scope(f.scope_a, fn ->
+        Repo.query!(
+          """
+          INSERT INTO issue_groups(id,company_id,source_id,fingerprint,parser_version,first_seen,last_seen,severity,data)
+          SELECT gen_random_uuid(),company_id,source_id,fingerprint,parser_version,first_seen,last_seen + interval '1 second',severity,data
+          FROM issue_groups CROSS JOIN generate_series(1,150) WHERE id=$1::text::uuid
+          """,
+          [group["id"]]
+        )
+      end)
+
+    conn = Plug.Test.init_test_session(build_conn(), %{operator_token: f.token_a})
+    {:ok, view, _html} = live(conn, "/companies/#{f.a.id}/investigations?focus=#{group["id"]}")
+
+    # not visible in the loaded set: the focus is silently ignored
+    refute has_element?(view, "#evidence")
+    refute has_element?(view, "#groups-#{group["id"]}")
   end
 end

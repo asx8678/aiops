@@ -30,6 +30,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   public.oban_jobs, public.oban_peers
   TO ops_brain_runtime;
 GRANT SELECT, INSERT, DELETE ON public.observation_revisions, public.occurrence_evidence TO ops_brain_runtime;
+-- No direct UPDATE/DELETE/TRUNCATE; deliberate parent retention cascades still apply.
+GRANT SELECT, INSERT ON public.issue_audit_events TO ops_brain_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ops_brain_runtime;
 GRANT USAGE ON TYPE public.oban_job_state TO ops_brain_runtime;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ops_brain_backup;

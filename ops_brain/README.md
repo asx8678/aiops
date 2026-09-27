@@ -6,9 +6,18 @@ Phoenix/LiveView, Ecto/PostgreSQL and Oban. Local functionality includes authent
 
 **Not production-ready or live-validated.** Collection and delivery are disabled by default. No runtime AI, remediation, source mutation or fabricated healthy data. Precise task/gap ledger: [`../ops_command_center_v2/IMPLEMENTATION_STATUS.md`](../ops_command_center_v2/IMPLEMENTATION_STATUS.md). The user explicitly requested all remaining local slices; original safety gates remain binding.
 
+## Start here: Command center
+
+After sign-in the workspace landing (`/`) resolves your workspace and goes straight to its **Command center**. The two URLs you actually use:
+
+- **Command center** — `/companies/<company_id>/command`: what is broken now (an attention list where finding-derived items carry an **Investigate** link that opens the focused finding and its evidence), what is about to break (storage and saturation forecasts, failing pipelines) and where you are blind (stale or erroring sources). A `?environment=prod|staging|dev` filter (default: all environments) narrows every panel; the page refreshes every 30 seconds.
+- **Troubleshoot** — `/companies/<company_id>/troubleshoot?service=<service_key>&environment=<environment>`: everything about one service in one environment — next checks, timeline, metric windows, storage, findings with evidence, Kubernetes runtime objects and pipeline runs. The service picker patches the URL; an unknown service or environment falls back to the first production service.
+
+Missing data is shown as unknown, never healthy. Both pages recheck authorization on navigation and on every event and refresh.
+
 ## Single-workspace home
 
-Open **http://localhost:4000/** for the “A clearer view of operations” home, with direct operations navigation and Development / Staging / Production cards. No company selection is needed. Local development selects the seeded demo; deployments use `OPS_BRAIN_WORKSPACE_COMPANY_ID` for an approved company. Membership checks remain intact. See [`docs/SINGLE_WORKSPACE.md`](docs/SINGLE_WORKSPACE.md) for setup, environment filtering, and monochrome logo assets.
+Open **http://localhost:4000/** — the landing resolves the workspace and goes straight to its **Command center** (see Start here above); only the workspace-error state renders on `/`. No company selection is needed. Local development selects the seeded demo; deployments use `OPS_BRAIN_WORKSPACE_COMPANY_ID` for an approved company. Membership checks remain intact. See [`docs/SINGLE_WORKSPACE.md`](docs/SINGLE_WORKSPACE.md) for setup, environment filtering, and monochrome logo assets.
 
 ## Offline demo — no cluster access required
 

@@ -5,7 +5,9 @@ defmodule OpsBrain.Notifications do
 
   def prepare(c, group_id, now) do
     g =
-      Store.one("SELECT revision,severity FROM issue_groups WHERE id=$1::text::uuid", [group_id])
+      Store.one("SELECT revision,severity FROM issue_groups WHERE id=$1::text::uuid FOR UPDATE", [
+        group_id
+      ])
 
     for {destination, sink} <- sinks(), approved?(sink, c.company_id) do
       last =
@@ -140,6 +142,13 @@ defmodule OpsBrain.Notifications do
   end
 
   defp claim(c, id, now) do
+    # Match prepare/review lock ordering. This transaction ends before HTTP;
+    # a local edit cannot race the revision/payload snapshot used for this send.
+    Repo.query!(
+      "SELECT id FROM issue_groups WHERE id=(SELECT group_id FROM notification_outbox WHERE id=$1::text::uuid AND source_id=$2::text::uuid) FOR UPDATE",
+      [id, c.id]
+    )
+
     row =
       Store.one(
         "SELECT o.id::text,o.group_id::text,o.revision,o.destination,o.status,o.attempts,o.next_at,g.revision AS current_revision,g.severity,g.data,g.status AS group_status,g.snoozed_until FROM notification_outbox o JOIN issue_groups g ON g.id=o.group_id AND g.company_id=o.company_id WHERE o.id=$1::text::uuid AND o.source_id=$2::text::uuid FOR UPDATE OF o",
@@ -172,7 +181,7 @@ defmodule OpsBrain.Notifications do
       row["status"] != "pending" ->
         Repo.rollback(:not_pending)
 
-      row["revision"] < row["current_revision"] ->
+      row["revision"] < row["current_revision"] and replacement?(row) ->
         Repo.query!(
           "UPDATE notification_outbox SET status='coalesced',updated_at=$2 WHERE id=$1::text::uuid",
           [id, now]
@@ -187,13 +196,23 @@ defmodule OpsBrain.Notifications do
         Repo.rollback(:not_due)
 
       true ->
+        # Owner/review edits also increment issue revisions, but do not create
+        # replacement deliveries. Keep this delivery's identity, retry budget,
+        # and deadline, and send the current local state instead of dropping it.
         Repo.query!(
-          "UPDATE notification_outbox SET status='delivering',attempts=attempts+1,updated_at=$2 WHERE id=$1::text::uuid",
-          [id, now]
+          "UPDATE notification_outbox SET status='delivering',revision=$3,attempts=attempts+1,updated_at=$2 WHERE id=$1::text::uuid",
+          [id, now, row["current_revision"]]
         )
 
-        {row, sink}
+        {Map.put(row, "revision", row["current_revision"]), sink}
     end
+  end
+
+  defp replacement?(row) do
+    Store.one(
+      "SELECT id FROM notification_outbox WHERE group_id=$1::text::uuid AND destination=$2 AND revision > $3 LIMIT 1",
+      [row["group_id"], row["destination"], row["revision"]]
+    ) != nil
   end
 
   @doc "Scoped local notification state for a finding. Never exposes global Oban arguments."

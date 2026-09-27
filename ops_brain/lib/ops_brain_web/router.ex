@@ -34,6 +34,8 @@ defmodule OpsBrainWeb.Router do
     live_session :operators, on_mount: [{OpsBrainWeb.OperatorAuth, :require}] do
       live "/", PortfolioLive, :index
       live "/companies/:company_id", CompanyLive, :show
+      live "/companies/:company_id/command", CommandLive, :index
+      live "/companies/:company_id/troubleshoot", TroubleshootLive, :index
       live "/companies/:company_id/demo", DemoLive, :index
       live "/companies/:company_id/pipelines", OperationsLive, :pipelines
       live "/companies/:company_id/services", OperationsLive, :services

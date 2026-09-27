@@ -143,9 +143,30 @@ defmodule OpsBrain.TelemetrySourcesTest do
     end)
 
     {:ok, [g]} = Issues.list(f.scope_a)
-    assert {:ok, %{"status" => "quiet"}} = Issues.review(f.scope_a, g["id"], "quiet")
-    assert {:ok, _} = Issues.snooze(f.scope_a, g["id"], DateTime.add(f.now, 3600), f.now)
-    assert {:ok, nil} = Issues.snooze(f.scope_b, g["id"], DateTime.add(f.now, 3600), f.now)
+
+    assert {:ok, %{"status" => "quiet"}} =
+             Issues.review(f.scope_a, g["id"], "quiet",
+               expected_revision: issue_revision(f.scope_a, g["id"])
+             )
+
+    assert {:ok, _} =
+             Issues.snooze(
+               f.scope_a,
+               g["id"],
+               DateTime.add(f.now, 3600),
+               [expected_revision: issue_revision(f.scope_a, g["id"])],
+               f.now
+             )
+
+    assert {:ok, nil} =
+             Issues.snooze(
+               f.scope_b,
+               g["id"],
+               DateTime.add(f.now, 3600),
+               [expected_revision: issue_revision(f.scope_a, g["id"])],
+               f.now
+             )
+
     now = DateTime.add(f.now, 31)
     {:ok, {:claimed, s2}} = Collection.claim(c.id, now)
     {:ok, success} = AzureBuild.normalize(c, run(c, 101, "succeeded"))

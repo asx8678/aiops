@@ -312,7 +312,8 @@ defmodule OpsBrain.Demo.Dataset do
                   "assumption" => "250 GiB volume; constant synthetic growth"
                 },
                 else: nil
-              )
+              ),
+            "storage" => if(kind == "capacity", do: storage(cluster, workload.name))
           })
 
         {"observation_windows",
@@ -332,6 +333,39 @@ defmodule OpsBrain.Demo.Dataset do
       end
 
     [service | windows]
+  end
+
+  # 24 hourly used-space samples for services backed by a volume. reporting in
+  # prod shows a sudden growth jump; the others grow at a steady, normal rate.
+  defp storage(cluster, service) do
+    volume =
+      %{
+        "checkout-api" => "orders-postgres",
+        "reporting" => "reporting-postgres",
+        "session-worker" => "session-redis"
+      }[service]
+
+    if volume do
+      prod = cluster.environment == "prod"
+
+      {end_used, baseline, recent} =
+        case {service, prod} do
+          {"reporting", true} -> {215.0, 0.15, 2.1}
+          {"checkout-api", true} -> {145.0, 0.2, 0.2}
+          {_, true} -> {40.0, 0.05, 0.05}
+          _ -> {30.0, 0.02, 0.02}
+        end
+
+      history =
+        for hours_ago <- 23..0//-1 do
+          recent_hours = min(hours_ago, 6)
+          baseline_hours = max(hours_ago - 6, 0)
+          used = end_used - recent * recent_hours - baseline * baseline_hours
+          %{"hours_ago" => hours_ago, "used_gib" => Float.round(used, 2)}
+        end
+
+      %{"volume" => volume, "size_gib" => 250, "history" => history}
+    end
   end
 
   def inventory(now) do
@@ -535,8 +569,16 @@ defmodule OpsBrain.Demo.Dataset do
       cluster = if index == 66, do: "nw-eu-staging", else: "nw-eu-prod"
 
       result =
-        if index in [70, 71],
-          do: "succeeded",
+        cond do
+          index in [70, 71] -> "succeeded"
+          # search-indexer keeps failing since its repository path changed.
+          w.name == "search-indexer" and index > 30 -> "failed"
+          true -> nil
+        end
+
+      result =
+        if result,
+          do: result,
           else:
             Enum.at(
               ~w(succeeded succeeded succeeded failed succeeded canceled partiallySucceeded),

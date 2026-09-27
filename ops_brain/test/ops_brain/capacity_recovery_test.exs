@@ -148,7 +148,12 @@ defmodule OpsBrain.CapacityRecoveryTest do
     seed_windows(f, DateTime.add(f.now, -240), [600, 700, 800, 900, 1000])
     assert {:ok, %{condition: "critical"}} = evaluate(f, c, f.now, f.now)
     {:ok, [g]} = Issues.list(f.scope_a)
-    assert {:ok, _} = Issues.assign(f.scope_a, g["id"], "owner")
+
+    assert {:ok, _} =
+             Issues.assign(f.scope_a, g["id"], "owner",
+               expected_revision: issue_revision(f.scope_a, g["id"])
+             )
+
     base = DateTime.add(f.now, 60)
     seed_windows(f, base, Enum.to_list(701..760))
     at = DateTime.add(base, 59 * 60)
@@ -167,7 +172,12 @@ defmodule OpsBrain.CapacityRecoveryTest do
     assert recovered["owner"] == "owner"
     assert {:ok, %{condition: "normal"}} = evaluate(f, c, at, at)
     assert {:ok, [^recovered]} = Issues.list(f.scope_a)
-    assert {:ok, _} = Issues.review(f.scope_a, g["id"], "closed_by_reviewer")
+
+    assert {:ok, _} =
+             Issues.review(f.scope_a, g["id"], "closed_by_reviewer",
+               expected_revision: issue_revision(f.scope_a, g["id"])
+             )
+
     assert {:ok, %{condition: "normal"}} = evaluate(f, c, at, at)
     {:ok, [closed]} = Issues.list(f.scope_a)
     assert closed["status"] == "closed_by_reviewer"

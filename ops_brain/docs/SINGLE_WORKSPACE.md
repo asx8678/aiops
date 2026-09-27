@@ -2,9 +2,9 @@
 
 ## Open the app
 
-**http://localhost:4000/** now keeps the “A clearer view of operations.” headline and the orbital illustration, but opens the configured workspace directly. There is no company grid, company search, or company switcher. The sidebar name is a static identity label; Home always returns to the dashboard.
+**http://localhost:4000/** resolves the configured workspace and goes straight to its **Command center** (`/companies/:company_id/command`). Only the workspace-error state renders on `/` — that frame keeps the “A clearer view of operations.” headline and the orbital illustration. There is no company grid, company search, or company switcher. The sidebar name is a static identity label; the Home link returns to the landing, i.e. the Command center.
 
-The local development configuration selects the existing **Demo · Northwind Retail** workspace (`c057e110-0000-4000-8000-000000000001`). The home shows 48 mapped targets, 7 source identities, 5 retained findings, and 210 simulated pod snapshots after demo provisioning. **Explore resources** opens the existing explorer; **Follow the evidence** opens Investigations. Nothing is seeded, reset, enabled or connected by visiting Home. The synthetic banner remains visible.
+The local development configuration selects the existing **Demo · Northwind Retail** workspace (`c057e110-0000-4000-8000-000000000001`). The former home-page stats and the **Explore resources** / **Follow the evidence** cards were removed with the landing change; their destinations (demo explorer, Investigations) and all operational views remain in the sidebar navigation, and the Command center links straight into Troubleshoot and focused findings. Nothing is seeded, reset, enabled or connected by visiting the landing. The synthetic banner remains visible on the demo's pages.
 
 The original `Local Dev` company and all stored data are untouched. Legacy `/companies/:company_id/...` URLs remain valid and authorize exactly as before; company IDs remain internal scoping, not a navigation step.
 
@@ -16,9 +16,17 @@ Changing this setting does not delete other companies or restrict their previous
 
 ## Three environments
 
-Home has **Development**, **Staging**, and **Production** cards. They link directly to the Services view filtered by `?environment=dev|staging|prod`. The same explicit-mapping filter is available in Services and Capacity and persists through in-view refresh and text search. Summaries describe the bounded loaded set within that environment, before text search. Unmapped observation windows appear only under **All environments**; an environment name does not infer ownership or health.
+The former Home environment cards were removed with the landing change. The **Command center** now carries a `?environment=prod|staging|dev` filter (default all) applied in SQL before its bounded reads, with the accepted Kubernetes object-attribution exception. Services and Capacity keep their explicit-mapping filter, which persists through in-view refresh and text search; their summaries describe the bounded loaded set within that environment, before text search. Unmapped observation windows appear only under **All environments**; an environment name does not infer ownership or health.
 
 The current offline dataset has 24 staging and 24 production service targets. Development is a configured identity with no mapped targets, so it is displayed honestly as empty/unknown. This change does not fabricate a third cluster or alter the seeded data. Pipelines, Investigations and Source health retain their existing workspace-wide scopes.
+
+## Capacity evaluations
+
+Capacity now shows stored `capacity_evaluation` evidence separately from supporting metric windows. Its summary cards count those evaluations, not raw gauge conditions. Forecast cards show the stored condition, conditional time to threshold, explanation and evaluation/receipt/expiry times; they never recompute a forecast or claim current health.
+
+Only unexpired, non-tombstoned records appear. Environment filtering happens before the 100-evaluation limit. New evidence records explicit service identity; legacy evidence can use retained target/input-window identity within the same company. Unresolved mappings appear only under **All environments**. Legacy output-only evidence stays **Unknown**, not an invented estimate. Supporting service/window lists retain their existing bounded-set filtering.
+
+Review plan, regressions and historical-data limits: [REVIEW_FIXES.md](REVIEW_FIXES.md).
 
 ## Universal logo
 

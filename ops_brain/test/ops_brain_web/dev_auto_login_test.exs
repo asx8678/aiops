@@ -34,7 +34,12 @@ defmodule OpsBrainWeb.DevAutoLoginTest do
   test "regular authenticated sessions and logout remain available", f do
     conn = init_test_session(build_conn(), operator_token: f.token_a)
     assert redirected_to(get(conn, "/sign-in")) == "/"
-    {:ok, view, _} = live(conn, "/")
+
+    # the landing goes straight to the workspace command center
+    command = "/companies/#{f.a.id}/command"
+    assert {:error, {:redirect, %{to: ^command}}} = live(conn, "/")
+
+    {:ok, view, _} = live(conn, command)
     assert has_element?(view, "#sign-out")
     refute has_element?(view, "#dev-auto-login")
     assert redirected_to(delete(conn, "/sign-out")) == "/sign-in"

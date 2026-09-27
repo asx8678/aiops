@@ -117,6 +117,10 @@ defmodule OpsBrain.Integration.ComposedWorkflowTest do
 
     assert {:ok, [_]} = Issues.list(f.scope_a)
     assert {:ok, []} = Issues.list(f.scope_b)
-    assert {:ok, nil} = Issues.review(f.scope_b, group, "locally_acknowledged")
+
+    assert {:ok, nil} =
+             Issues.review(f.scope_b, group, "locally_acknowledged",
+               expected_revision: issue_revision(f.scope_a, group)
+             )
   end
 end

@@ -89,7 +89,15 @@ defmodule OpsBrain.NotificationOutcomesTest do
   end
 
   test "local snooze defers only this application delivery", f do
-    assert {:ok, _} = Issues.snooze(f.scope_a, f.out["group_id"], DateTime.add(f.now, 60), f.now)
+    assert {:ok, _} =
+             Issues.snooze(
+               f.scope_a,
+               f.out["group_id"],
+               DateTime.add(f.now, 60),
+               [expected_revision: issue_revision(f.scope_a, f.out["group_id"])],
+               f.now
+             )
+
     Application.put_env(:ops_brain, :notification_plug, fn _ -> raise "snoozed notice sent" end)
     assert {:error, :not_due} = Notifications.deliver(f.c.id, f.out["id"], f.now)
   end

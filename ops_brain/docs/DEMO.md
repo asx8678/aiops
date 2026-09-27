@@ -6,7 +6,7 @@ With the local server running, open:
 
 http://localhost:4000/companies/c057e110-0000-4000-8000-000000000001/demo
 
-Or open **http://localhost:4000/**. The local home is pinned to the seeded demo, with direct **Explore resources** and **Follow the evidence** links. There is no company chooser. See [Single-workspace home](SINGLE_WORKSPACE.md).
+Or open **http://localhost:4000/** — the landing goes straight to the demo workspace's **Command center** (step 0 of the guided tour below). There is no company chooser. See [Single-workspace home](SINGLE_WORKSPACE.md).
 The existing development auto-login remains unchanged. Other operators need explicit membership.
 
 **This is an offline snapshot, not a real cluster, database server, or an HTTP API emulator.** Source connection states, request counts, errors, and operational evidence are simulated and labeled. No Kubernetes credentials, kubeconfig, cloud account, external network, provider APIs, live collection, or notification delivery is required or enabled. Only the application's own local PostgreSQL database is used.
@@ -33,6 +33,7 @@ Resources include realistic cluster/namespace ownership, replica relationships, 
 
 ## Guided tour
 
+0. **Command center → reporting-postgres → Troubleshoot.** Start at `http://localhost:4000/companies/c057e110-0000-4000-8000-000000000001/command`: the attention list, the storage forecast with **reporting-postgres** flagged critical for abnormal growth, failing **search-indexer** pipelines, and the stale staging Loki source under Blind spots. The storage item's **Troubleshoot** link lands on the `reporting` service's page, where the same volume, its findings and the evidence trail appear; attention findings also carry **Investigate** links that open the focused finding in Investigations.
 1. **Demo explorer:** filter by cluster, namespace, kind, or text; page through 40 rows at a time; expand **Inspect JSON**. Try `Database`, `checkout-api`, `OOMKilled`, and `ImagePullBackOff`.
 2. **Investigations → Checkout latency → Evidence:** five observations connect a pool-size rollout, readiness failures, latency metrics, SQLSTATE 53300 logs, and PostgreSQL connections at 492/500. The timeline links actual retained evidence IDs. Staging provides counterevidence. The existing deterministic correlation function creates a candidate, **not proof of cause**; no AI runs.
 3. Other findings demonstrate inventory OOM kills, conditional storage-capacity warnings, staging image-pull denial, and unavailable log coverage. Missing telemetry remains unknown. The storage and missing-telemetry scenarios do not invent a deployment cause.

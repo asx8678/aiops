@@ -24,11 +24,14 @@ defmodule OpsBrainWeb.AuthorizationTest do
 
   test "company portfolio and direct source URLs enforce membership", f do
     conn = init_test_session(f.conn, operator_token: f.token_a)
-    {:ok, view, _} = live(conn, "/")
-    assert has_element?(view, "#home-workspace[data-company-id='#{f.a.id}']")
-    refute has_element?(view, "#home-workspace[data-company-id='#{f.b.id}']")
-    refute has_element?(view, "#companies")
-    assert has_element?(view, "#coverage-not-configured")
+
+    # the landing resolves straight to the authorized company's command center
+    command = "/companies/#{f.a.id}/command"
+    assert {:error, {:redirect, %{to: ^command}}} = live(conn, "/")
+
+    {:ok, view, _} = live(conn, "/companies/#{f.a.id}/command")
+    refute has_element?(view, "#companies, #company-search, a.workspace-switch")
+
     assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, "/companies/#{f.b.id}")
     {:ok, view, _} = live(conn, "/companies/#{f.a.id}/sources/#{f.source_a.id}")
     assert has_element?(view, "#selected-source")
@@ -56,9 +59,12 @@ defmodule OpsBrainWeb.AuthorizationTest do
   end
 
   test "revoked sessions are checked on events even without company selection", f do
-    conn = init_test_session(f.conn, operator_token: f.token_a)
+    conn = init_test_session(f.conn, operator_token: f.token_dual)
+
+    # ambiguous membership: the landing renders with no company selected
     {:ok, view, _} = live(conn, "/")
-    Accounts.revoke_session(f.token_a)
+    refute has_element?(view, "#home-workspace")
+    Accounts.revoke_session(f.token_dual)
     render_click(element(view, "#refresh"))
     assert_redirect(view, "/sign-in")
   end

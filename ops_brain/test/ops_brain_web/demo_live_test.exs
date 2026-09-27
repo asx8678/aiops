@@ -16,6 +16,42 @@ defmodule OpsBrainWeb.DemoLiveTest do
     })
   end
 
+  test "command center environment filtering keeps demo storage provenance", f do
+    # the demo's reporting-postgres volume is a prod critical storage risk
+    {:ok, prod} = OpsBrain.Insights.command(f.demo_scope, "prod", f.now)
+
+    assert [%{} = reporting] = Enum.filter(prod.storage, &(&1.volume == "reporting-postgres"))
+    assert reporting.level == "critical"
+    assert reporting.environment == "prod"
+
+    # staging has its own namesake volume, but never the prod critical one
+    {:ok, staging} = OpsBrain.Insights.command(f.demo_scope, "staging", f.now)
+
+    assert Enum.filter(
+             staging.storage,
+             &(&1.volume == "reporting-postgres" and &1.level == "critical")
+           ) == []
+
+    # All keeps the unfiltered view
+    {:ok, all} = OpsBrain.Insights.command(f.demo_scope, "", f.now)
+
+    assert Enum.any?(
+             all.storage,
+             &(&1.volume == "reporting-postgres" and &1.level == "critical")
+           )
+
+    # the command page itself: prod shows the critical volume, staging does not
+    {:ok, view, _html} =
+      live(f.demo_conn, "/companies/#{Demo.company_id()}/command?environment=prod")
+
+    assert has_element?(view, "#storage-risks .cc-critical strong", "reporting-postgres")
+
+    {:ok, view2, _html2} =
+      live(f.demo_conn, "/companies/#{Demo.company_id()}/command?environment=staging")
+
+    refute has_element?(view2, "#storage-risks .cc-critical strong", "reporting-postgres")
+  end
+
   test "deterministic mid-size inventory, explicit provenance, and no live side effects", f do
     assert Dataset.build(f.now) == Dataset.build(f.now)
     {:ok, snapshot} = Demo.snapshot(f.demo_scope)
@@ -39,7 +75,12 @@ defmodule OpsBrainWeb.DemoLiveTest do
 
   test "rerun preserves local decisions; reset/remove affect only the reserved demo company", f do
     gid = Dataset.id("finding:checkout")
-    assert {:ok, _} = Issues.assign(f.demo_scope, gid, "demo-reviewer")
+
+    assert {:ok, _} =
+             Issues.assign(f.demo_scope, gid, "demo-reviewer",
+               expected_revision: issue_revision(f.demo_scope, gid)
+             )
+
     {:ok, before} = Demo.snapshot(f.demo_scope)
     Demo.seed!(TestAdminRepo, f.alice.name)
     {:ok, after_seed} = Demo.snapshot(f.demo_scope)

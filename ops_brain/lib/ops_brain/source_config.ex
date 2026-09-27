@@ -76,7 +76,7 @@ defmodule OpsBrain.SourceConfig do
              Map.get(p, :freshness_seconds, 120) in 1..3600,
          true <-
            if(kind == "prometheus",
-             do: metric_profile?(p),
+             do: metric_profile?(p) and saturation_signal_valid?(p),
              else: is_binary(p[:selector]) and byte_size(p.selector) <= 1000
            ) do
       :ok
@@ -98,6 +98,29 @@ defmodule OpsBrain.SourceConfig do
   end
 
   defp kind_valid(_), do: {:error, :missing_profile}
+
+  # Explicit trusted signal attribution: the unit alone does not establish
+  # semantics (a "count" gauge may be queue depth, open files, workers...), so
+  # connection/memory labels and their guidance require this reviewed marker.
+  # Profile names are never parsed for meaning.
+  # A classified signal must match the profile's actual shape: connection
+  # counts are gauges in "count"; memory working sets are gauges in "bytes".
+  # Incompatible markers are rejected rather than silently relabeled.
+  defp saturation_signal_valid?(p) do
+    case p[:saturation_signal] do
+      nil ->
+        true
+
+      "connections" ->
+        p[:semantics] == "gauge" and p[:unit] == "count"
+
+      "memory_working_set" ->
+        p[:semantics] == "gauge" and p[:unit] == "bytes"
+
+      _ ->
+        false
+    end
+  end
 
   defp metric_profile?(%{semantics: "gauge", query: query}),
     do: is_binary(query) and byte_size(query) in 1..2000

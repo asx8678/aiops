@@ -1,6 +1,6 @@
 defmodule OpsBrain.Issues do
   @moduledoc "Local notices: separate fingerprint identities and event-time bounded episodes. No upstream actions."
-  alias OpsBrain.{Repo, Store, Tenancy, Lifecycle, Redactor}
+  alias OpsBrain.{Repo, Store, Tenancy, Lifecycle, IssueReview}
 
   # One logical occurrence per operation/attempt/window. Improved evidence is an
   # append-only revision pointing at the occurrence, not a second occurrence.
@@ -197,14 +197,24 @@ defmodule OpsBrain.Issues do
       nil ->
         id = Ecto.UUID.generate()
 
-        data = %{
-          "classification" => fp.classification,
-          "template" => fp.template,
-          "reason" => fp.reason,
-          "missing" => "No confirmed root cause or runtime impact; investigate source evidence",
-          "count_basis" => Map.get(identity, :count_basis, "classified failed operation"),
-          "scope" => Map.get(identity, :scope, "CI-only / unresolved")
-        }
+        data =
+          %{
+            "classification" => fp.classification,
+            "template" => fp.template,
+            "reason" => fp.reason,
+            "missing" => "No confirmed root cause or runtime impact; investigate source evidence",
+            "count_basis" => Map.get(identity, :count_basis, "classified failed operation"),
+            "scope" => Map.get(identity, :scope, "CI-only / unresolved")
+          }
+          # prediction findings persist their structured target identity (nil
+          # for explicitly unscoped CI-only groups) so reads filter by exact
+          # instance/environment instead of scope substrings; other callers
+          # never set the key and keep the legacy scope filter untouched.
+          |> then(fn data ->
+            if Map.has_key?(identity, :prediction_target),
+              do: Map.put(data, "prediction_target", Map.get(identity, :prediction_target)),
+              else: data
+          end)
 
         Repo.query!(
           "INSERT INTO issue_groups(id,company_id,source_id,fingerprint,parser_version,first_seen,last_seen,severity,data) VALUES($1::text::uuid,$2::text::uuid,$3::text::uuid,$4,$5,$6,$6,$7,$8)",
@@ -321,103 +331,18 @@ defmodule OpsBrain.Issues do
     end
   end
 
-  def snooze(scope, id, until, now \\ Store.now()) do
-    with {:ok, _} <- Ecto.UUID.cast(id),
-         true <- match?(%DateTime{}, until),
-         true <- DateTime.diff(until, now) in 1..604_800 do
-      Tenancy.with_scope(scope, fn ->
-        Store.one(
-          "UPDATE issue_groups SET snoozed_until=$2 WHERE id=$1::text::uuid RETURNING id::text,snoozed_until",
-          [id, until]
-        )
-      end)
-    else
-      _ -> {:error, :invalid_snooze}
-    end
-  end
+  @doc "Local snooze. Requires expected_revision; the optional clock is for trusted callers/tests."
+  def snooze(scope, id, until, opts \\ [], now \\ Store.now()),
+    do: IssueReview.snooze(scope, id, until, opts, now)
 
-  def review(scope, id, action, opts \\ [])
+  @doc "Local lifecycle review. Requires expected_revision; optional owner preserves existing assignment when nil."
+  def review(scope, id, action, opts \\ []), do: IssueReview.review(scope, id, action, opts)
 
-  def review(scope, id, action, owner) when is_binary(owner) or is_nil(owner),
-    do: review_impl(scope, id, action, owner: owner)
+  @doc "Local assignment with an expected_revision from the caller's observed snapshot."
+  def assign(scope, id, owner, opts \\ []), do: IssueReview.assign(scope, id, owner, opts)
 
-  def review(scope, id, action, opts) when is_list(opts),
-    do: review_impl(scope, id, action, opts)
+  def unassign(scope, id, opts \\ []), do: IssueReview.unassign(scope, id, opts)
 
-  def assign(scope, id, owner) do
-    with {:ok, _} <- Ecto.UUID.cast(id),
-         {:ok, cleaned} <- validate_assign_owner(owner) do
-      Tenancy.with_scope(scope, fn ->
-        Store.one(
-          "UPDATE issue_groups SET owner=$2,revision=revision+1 WHERE id=$1::text::uuid RETURNING id::text,owner",
-          [id, cleaned]
-        )
-      end)
-    else
-      _ -> {:error, :invalid_owner}
-    end
-  end
-
-  def unassign(scope, id) do
-    with {:ok, _} <- Ecto.UUID.cast(id) do
-      Tenancy.with_scope(scope, fn ->
-        Store.one(
-          "UPDATE issue_groups SET owner=NULL,revision=revision+1 WHERE id=$1::text::uuid RETURNING id::text,owner",
-          [id]
-        )
-      end)
-    else
-      _ -> {:error, :not_found}
-    end
-  end
-
-  defp review_impl(scope, id, action, opts) do
-    owner = Keyword.get(opts, :owner)
-
-    with {:ok, _} <- Ecto.UUID.cast(id),
-         {:ok, action} <- Lifecycle.review_status(action),
-         {:ok, owner} <- validate_review_owner(owner) do
-      result =
-        Tenancy.with_scope(scope, fn ->
-          current =
-            Store.one(
-              "SELECT id::text,status FROM issue_groups WHERE id=$1::text::uuid FOR UPDATE",
-              [id]
-            )
-
-          cond do
-            current == nil ->
-              nil
-
-            match?({:error, _}, Lifecycle.review_status(current["status"], action)) ->
-              {:error, :invalid_transition}
-
-            true ->
-              Store.one(
-                "UPDATE issue_groups SET status=$2,owner=COALESCE($3,owner),revision=revision+1 WHERE id=$1::text::uuid RETURNING id::text,status,owner",
-                [id, action, owner]
-              )
-          end
-        end)
-
-      case result do
-        {:ok, {:error, reason}} -> {:error, reason}
-        other -> other
-      end
-    else
-      _ -> {:error, :invalid_review}
-    end
-  end
-
-  defp validate_review_owner(nil), do: {:ok, nil}
-
-  defp validate_review_owner(owner) when is_binary(owner) and byte_size(owner) <= 100,
-    do: {:ok, Redactor.clean(owner, 100)}
-
-  defp validate_review_owner(_), do: {:error, :invalid_owner}
-
-  defp validate_assign_owner(owner) when is_binary(owner) and byte_size(owner) in 1..100,
-    do: {:ok, Redactor.clean(owner, 100)}
-
-  defp validate_assign_owner(_), do: {:error, :invalid_owner}
+  @doc "The latest 50 authorized local-action audit events, newest revision first."
+  def audit_history(scope, id), do: IssueReview.history(scope, id)
 end

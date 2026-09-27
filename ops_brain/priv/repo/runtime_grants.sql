@@ -13,4 +13,7 @@ GRANT SELECT, INSERT, DELETE ON observation_revisions TO ops_brain_runtime;
 -- Immutable occurrence history: append/expire only, never edit in place.
 REVOKE UPDATE ON occurrence_evidence FROM ops_brain_runtime;
 GRANT SELECT, INSERT, DELETE ON occurrence_evidence TO ops_brain_runtime;
+-- Operator audit history is append-only while its parent finding is retained.
+REVOKE UPDATE, DELETE, TRUNCATE ON issue_audit_events FROM ops_brain_runtime;
+GRANT SELECT, INSERT ON issue_audit_events TO ops_brain_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ops_brain_runtime;

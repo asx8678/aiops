@@ -1,0 +1,1215 @@
+# CURRENT AUTHORITATIVE STATUS (read first)
+
+Updated for the final milestone (batch 7, passes 31-35 of 35; 35/35 complete). Historical Pass sections are narrative; for current facts read this banner plus the final consolidated register and revision addenda at the end. Scores are PROVISIONAL; no DB test, live-provider call, browser or screen-reader check was performed. Batch-7 raw arithmetic was corrected in place and the Final reconciliation addendum (full 35-row table plus eight-category calibration) is authoritative.
+
+Current register (findings and risks):
+- F-01 High: release-contract tests (ops_brain/rel/tests) not invoked by CI (.github/workflows/ci.yml:70-78).
+- F-04 Medium: login limiter is a single-node in-memory window (login_limiter.ex:28-43).
+- F-08 Medium (risk, unmeasured): OperationsLive full load every 10s per socket (operations_live.ex:6,28-31,211-328).
+- F-02 Low (unproven): two grant scripts differ; effective privilege parity NOT DB-tested.
+- F-05 Low (dev-only, intentional): dev auto-login defaults on for :dev (dev_auto_login.ex:20-50; dev.exs:20-24).
+- F-09 Low/Medium: operations_live.ex is 908 lines.
+- F-13 Low (validation gap, visible not silent): sink config passes load without the approved_urls/approved_ip/https prerequisites send_message requires.
+- F-14 Low (optional semantic improvement / unverified a11y risk): shared table component th lacks scope; no production caller.
+- F-15 RETRACTED: the 208-pass figure is explicitly a dated executed-evidence entry (ACCEPTANCE_HARNESS.md:36-53) with seed/log/artifacts; it is not a claim about the current tree. Remaining current-execution gap stays under F-10; optional durable snapshot traceability improvement only.
+- Tradeoff (not defect): F-03 identity tables outside RLS; consumers traced membership-scoped.
+- Limitation (not defect): F-07 startup preflight + liveness present but ongoing DB-aware readiness not demonstrated; F-10 no disposable DB to run the suite; F-11 disabled integrations, no live validation.
+- Hypothesis (non-finding): H-01 OIDC.HTTP uses the reviewed hostname with verify_peer but does not pin an approved IP like Transport/send_message; no exploit path evidenced.
+- Cleared/non-findings: F-06 (retracted), F-12 (cleared), F-15 (retracted).
+
+Provisional overall scores: passes 1-10 = 75,75,75,75,76,76,77,76,76,77; passes 11-15 = 77,78,78,78,78; passes 16-20 = 78,78,78,78,79; passes 21-25 = 79,79,79,79,79; passes 26-30 = 79,80,80,80,79; passes 31-35 = 79,79,78,79,79. Final consolidated weighted score: 78/100 (not an average; a reasoned consolidation with evidence confidence reported separately; see the Final reconciliation addendum and Final calibration clarification). Production readiness: NOT READY.
+
+
+# Constellation audit findings1
+
+Multi-pass deep audit of the Constellation / ops_brain application.
+Audit plan: ops_brain/docs/DEEP_REVIEW_PLAN.md (read in full).
+Output file: findings1 (repository root). Only this file was written by the worker.
+
+## Snapshot and drift log
+
+- Snapshot HEAD: 33dea0b74ccda530306495941b74f20997369bae ("Build Constellation single-workspace console and offline demo"), 2026-09-21.
+- Working tree: dirty, 36 entries at batch start (21 modified tracked, 15 untracked), all user-owned and preserved.
+- Drift during passes 1-5: none. HEAD unchanged; no app, config, lockfile, migration or test file was modified. Only findings1 added.
+- Evidence tooling: Fovea sketch (230 indexed files, 6 production anchors); Elixir/Bash import edges not modeled, so all call tracing was done by direct source reading.
+- Environment: mix/elixir present (Elixir 1.20.4 / OTP 27 per mise.toml); deps and _build present. PostgreSQL reachable only at localhost:5432 (socket); the test database endpoint localhost:55432 refused connections.
+
+## Method and safety
+
+- Review-only. No implementation edits, no format, no deps.unlock, no commit/push/deploy, no collector/delivery/OIDC enablement, no live-provider traffic, no infrastructure provisioning.
+- mix precommit was never run (it mutates source/lock via format and deps.unlock --unused; mix.exs lines 60-62).
+- Database tests were NOT run: no independently verified preapproved disposable ops_brain_test database with distinct runtime/migrator roles exists here. localhost:55432 refused; the localhost:5432 socket was not assumed disposable. No DB was relabelled or bypassed.
+- Secrets were not read or exported. Only configuration/field names and redacted metadata were inspected.
+
+## Cumulative deduplicated finding register (stable IDs)
+
+Severity is justified against this app's read-only, disabled-by-default posture. "Confirmed" means traced in source; runtime/unverified items are labelled hypothesis or blocker.
+
+- F-01 (High, test/CI): Release contract tests under ops_brain/rel/tests (runtime_contract_test.exs, test_release_contract.py, release_probe.exs) are not referenced by .github/workflows/ci.yml; CI runs only ops_brain mix format/compile/test/routes/validate. Evidence: ci.yml steps; ops_brain/rel/tests/runtime_contract_test.exs (7 tests) and test_release_contract.py (backup/restore/migrate scripts). Impact: migration identity, grant ordering, TLS, backup/restore and preflight regressions are not gated. Fix: add a CI job running the Elixir runtime-contract tests and the Python release-contract tests against the disposable DB/roles. Regression: CI must fail on a deliberately broken preflight/migrate script. Effort M. Confidence: High. First seen Pass 1; confirmed Pass 4/5.
+- F-02 (Medium, maintainability/security): Two divergent grant definitions. ops_brain/priv/repo/runtime_grants.sql (additive, used by CI) differs materially from ops_brain/rel/runtime-grants.sql (revokes-all-first, requires -v approved_database and ops_brain_migrator identity, adds ops_brain_backup and oban_job_state). Evidence: direct diff of the two files; ci.yml applies priv/repo/runtime_grants.sql. Impact: privilege drift between CI-validated and release-applied grants. Fix: single reviewed source of truth or a test asserting both files grant the same privilege set. Regression: contract test diffing granted privileges. Effort M. Confidence: High. First seen Pass 1.
+- F-03 (Medium, security defense-in-depth): Global identity tables (operators, companies, memberships, operator_tokens, oidc_attempts) have no RLS; runtime role holds SELECT on operators/companies/memberships. Cross-company isolation for these depends on application filters (Tenancy.list_companies, Tenancy.authorize). Evidence: create_tenancy_foundation.exs lines 5-53 (no RLS on identity tables) vs RLS loop lines 74-83; runtime_grants.sql line 6; tenancy.ex lines 7-36. Precondition: an application query bug or future unscoped query. Impact: full identity/company enumeration rather than tenant data. Intentional tradeoff (RLS gate covers 17 operational tables), but not fail-closed for identity. Fix: scope-or-view policy or a chokepoint module review with negative tests. Regression: raw cross-company SELECT on companies/memberships raises/returns empty for a scoped session. Effort M. Confidence: High. First seen Pass 2.
+- F-04 (Medium, security): Login rate limiter is a single per-BEAM in-memory GenServer; no cross-node/DB counter, and it resets per 60s window. Evidence: login_limiter.ex lines 6-44. Single-deployment posture is stated elsewhere, so impact is limited, but a multi-node or restarted deployment resets limits. Fix: durable/shared limiter or document single-node constraint. Regression: limiter test across simulated windows. Effort S. Confidence: High. First seen Pass 2.
+- F-05 (Low, security, intentional dev convenience): Development auto-login is compiled only for :dev and runtime flag-gated, but dev.exs defaults OPS_BRAIN_DEV_AUTOLOGIN to "true" with operator "adam", and any GET issues a session. Evidence: dev_auto_login.ex lines 3-9, 20-50; dev.exs lines 20-24. Precondition: a :dev build exposed beyond localhost. Impact: silent authentication bypass in that environment. Fix: default the flag off or require explicit operator confirmation. Regression: dev build with flag off renders sign-in. Effort S. Confidence: High (design), Medium (exploitability). First seen Pass 2.
+- F-06 (Low, security hygiene): Static session signing_salt and encryption_salt literals in endpoint.ex lines 10-11. The real secret is secret_key_base; salts are not secrets but are shared across deployments. Fix: derive per-deployment salts. Effort S. Confidence: Medium. First seen Pass 2.
+- F-07 (Medium, operability): No HTTP readiness/health route; only a liveness-only bin/healthcheck and telemetry gauges (telemetry.ex periodic_measurements; health.ex; rel/overlays/bin/healthcheck). Evidence: phx.routes lists no /health; router.ex. Fix: expose bounded readiness that checks Repo/DatabaseSafety without leaking tenants. Regression: readiness returns non-200 when DB is down. Effort S. Confidence: High. First seen Pass 1/4.
+- F-08 (Medium, performance, unmeasured): OperationsLive schedules a full load every 10s per connected socket with no PubSub invalidation; investigations list and lateral joins run each refresh. Evidence: operations_live.ex lines 5-6, 28-31, 211-328. No benchmark was run; this is a static risk, not a measured defect. Fix: PubSub-scoped invalidation and/or adaptive interval. Regression: load test measuring query count per refresh. Effort M. Confidence: Medium (risk), Low (impact magnitude). First seen Pass 1/4.
+- F-09 (Low/Medium, maintainability): operations_live.ex is 908 lines mixing mount, events, loading, SQL and render; fabric-style module boundaries are weaker here than elsewhere. Evidence: wc -l. Fix: extract query/service modules. Effort L. Confidence: High. First seen Pass 1.
+- F-10 (Blocker, verification): 260 test definitions exist but the suite could not execute because no verified disposable DB/roles are available (localhost:55432 refused). test_helper.exs unconditionally runs DatabaseSafety.verify! and Fixtures.verify_disposable!, so even non-DB tests are gated. Evidence: test_helper.exs; fixtures.ex verify_disposable! lines 9-33; runtime.exs test branch lines 47-63. This is an environmental blocker, not a product defect and not a pass. First seen Pass 1; sustained all passes.
+- F-11 (Medium, verification, intentional): Collection, delivery and OIDC are disabled by default (config.exs; README). No live-provider end-to-end validation is possible within constraints; functional claims for Azure/Prometheus/Loki/Kubernetes reads remain source-traced only. Intentional owner gate. Confidence: High that gates are closed, Low that live behavior works. First seen Pass 3.
+- F-12 (Low, hypothesis): Health.measure and OperationalMetrics.measure query global oban metadata unscoped; they emit bounded, non-tenant dimensions, so this is intentional and not a leak. Marked hypothesis only; no evidence of tenant exposure. First seen Pass 4.
+
+## Per-pass coverage and score table
+
+Category weights: functional correctness/completeness 20; security/privacy/isolation 20; reliability/data integrity/recovery 15; UX/accessibility 10; architecture/maintainability 10; test quality/verification 10; performance/resources 5; deployment/observability/ops readiness 10.
+
+| Pass | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 1 | 68 | 82 | 78 | 62 | 80 | 72 | 75 | 78 | 74.65 | 75 |
+| 2 | 68 | 84 | 78 | 62 | 80 | 72 | 75 | 78 | 75.05 | 75 |
+| 3 | 69 | 84 | 79 | 62 | 80 | 72 | 75 | 78 | 75.40 | 75 |
+| 4 | 69 | 82 | 80 | 62 | 80 | 73 | 75 | 79 | 75.35 | 75 |
+| 5 | 70 | 82 | 80 | 63 | 80 | 73 | 75 | 79 | 75.65 | 76 |
+
+Weighted formula: round(sum(score * weight / 100)). Worked example Pass 1: (68*20 + 82*20 + 78*15 + 62*10 + 80*10 + 72*10 + 75*5 + 78*10)/100 = 7465/100 = 74.65 -> 75.
+
+## Execution checks actually run (fresh in this batch)
+
+Commands executed from ops_brain with mise-managed Elixir unless noted:
+- mix format --check-formatted -> exit 0 (FORMAT_EXIT=0).
+- MIX_ENV=test mix compile --warnings-as-errors -> success, "Generated ops_brain app".
+- MIX_ENV=prod mix compile --warnings-as-errors -> success.
+- mix phx.routes -> 13 HTTP routes + LiveView socket/longpoll listed; no /health route.
+- mix ops_brain.validate_config config/sources.example.json -> "0 sources, 0 notification destinations".
+- mix ops_brain.validate_config config/sources.prepared.json -> "4 sources, 1 notification destinations"; endpoints are .invalid placeholders and pass because they are disabled/placeholder-gated.
+- pg_isready localhost:55432 -> no response; sql probes refused.
+- git status/diff --stat: only findings1 added; no app drift.
+What these do and do not prove: they prove the tree formats and compiles cleanly with warnings-as-errors in test and prod, routes/config wiring is intact, and config validation is fail-closed for the example file. They do NOT prove runtime behavior, DB invariants, concurrency, LiveView interaction, accessibility or live-provider correctness.
+
+Reused evidence labels: all source citations above are from reads performed during this batch (Passes 1-5); no prior audit used. The compile/format/routes/validator commands were run once in this batch and are reused across Passes 1-3 with this label; Passes 4-5 reused them as well because the snapshot did not change (HEAD 33dea0b, clean wrt app files).
+
+## Pass 1 - Baseline correctness and capability claims (fresh)
+
+Snapshot: as header; no drift. Angle: does the implementation match its stated read-only, evidence-first, disabled-by-default capability claims?
+
+Fresh code inspected: mix.exs, config/config.exs, config/runtime.exs, config/prod.exs, config/dev.exs, .github/workflows/ci.yml, README.md, application.ex, router.ex, endpoint.ex, operations_live.ex (mount/events/load), demo.ex, demo_live.ex, collection.ex, telemetry_collection.ex, evidence.ex, issues.ex, issue_review.ex, notifications.ex, retention.ex, recovery.ex, scheduler.ex, workers, database_safety.ex, runtime_grants.sql, migrations.
+
+Critical paths traced: boot/supervision (application.ex lines 8-21: Repo -> DatabaseSafety -> Telemetry -> PubSub -> Oban -> Endpoint -> watch registry/supervisor -> Scheduler); disabled-by-default gates (config.exs maintenance/collection/delivery false; scheduler.ex lines 6-13; collection_worker.ex lines 17-23; evidence_worker.ex lines 12-16; maintenance_worker.ex lines 16-18; notifications.deliver delivery_enabled gate). Config claim: Configuration.read! rejects placeholder endpoints, duplicate IDs, >10 sources/company, >20 sinks, and requires multi_company_reviewed (configuration.ex read! block). Demo isolation: reserved company identity + local disposable DB guard (demo.ex verify_local!/reserved_company!).
+
+Strengths (path:line):
+- S-01 Disabled-by-default and compiler-safe gating across collection/enrichment/delivery/maintenance: scheduler.ex:6-13, collection_worker.ex:17-23, evidence_worker.ex:12-16, maintenance_worker.ex:16-18, notifications.deliver delivery_enabled.
+- S-02 Startup safety gate requiring non-owner/non-BYPASSRLS role, 17 forced-RLS tables and append-only audit grants: database_safety.ex:9-52.
+- S-03 Fail-closed config validation with placeholder detection: configuration.ex (read!/placeholder?), source_config.ex:20-48.
+- S-04 Demo cannot touch a non-reserved company and refuses non-disposable DBs: demo.ex verify_local!/reserved_company!.
+
+Weaknesses/findings confirmed this pass: F-01, F-02, F-07, F-08, F-09, F-10.
+Hypotheses only: F-05 (dev default), F-06 (static salts).
+Retracted: none.
+
+Scores: func 68, sec 82, rel 78, ux 62, arch 80, test 72, perf 75, deploy 78 -> 74.65 -> 75.
+Confidence: Medium-high for static capability claims; Low for runtime. Readiness verdict: NOT READY for production (README disclaimer; no live validation; DB suite unrun). Product band: 75 = solid with meaningful gaps.
+New/confirmed/revised/retracted: new 4 (F-01,F-02,F-07,F-09), confirmed 2 (F-08,F-10), revised 0, retracted 0.
+Recommendation: wire release tests into CI; unify grants; add readiness; verify DB suite on a disposable DB before raising confidence.
+
+## Pass 2 - Authentication, OIDC and company isolation (fresh)
+
+Snapshot: unchanged; no drift. Angle emphasis: outsider and authenticated-operator identity boundaries.
+
+Fresh code inspected: router.ex, operator_auth.ex, accounts.ex, accounts/operator.ex, accounts/token.ex, tenancy.ex, tenancy/*, oidc.ex, oidc/attempts.ex, oidc/config.ex, oidc/http.ex, oidc_controller.ex, session_controller.ex, login_limiter.ex, dev_auto_login.ex, endpoint.ex, portfolio_live.ex, company_live.ex, authorization_test.exs, tenancy_test.exs.
+
+Critical paths traced:
+- HTTP session: POST /sign-in -> Accounts.exchange_login_token deletes the login token and issues an 8h session in one transaction (accounts.ex:7-26); sign-out revokes (accounts.ex:59-69); session tokens are 32-byte random, stored hashed (accounts.ex:72-93). Cookie is encrypted+signed, http_only, same_site Strict, secure true in prod (endpoint.ex:7-16; prod.exs:3).
+- LiveView auth: on_mount re-derives scope from session token and re-checks on every handle_params and handle_event, using company_id from current_scope rather than user params (operator_auth.ex:17-46). Navigation re-queries membership via Tenancy.company inside with_scope (operations_live.ex:34-63).
+- Cross-company: Tenancy.authorize casts UUID, resolves operator from token, and requires a membership row (tenancy.ex:25-36); with_scope re-authorizes, rejects nested scopes, sets ops_brain.company_id transaction-locally and clears it (tenancy.ex:38-56,118-123). Source lookups bind id AND company_id (tenancy.ex:84-97).
+- OIDC: PKCE S256 and nonce/state generated with 32 random bytes (oidc.ex:6-31); durable single-use attempt consumed BEFORE provider HTTP (oidc.ex:40-48, attempts.ex:12-24); strict RS256 JWKS verification with kid selection, iss/aud/azp/exp/iat/nbf/nonce/sub checks and header-alg confusion guards (oidc.ex:79-130); HTTPS-only typed endpoints, no redirects, bounded 128KB bodies (oidc/config.ex:12-24, oidc/http.ex).
+- OIDC session issuance never creates identities/memberships, rechecks enabled (accounts.ex:44-57).
+
+Strengths: S-05 all of the above identity/session/OIDC controls; S-06 nested-scope rejection and per-transaction setting reset; S-07 membership rechecked on navigate/event/reconnect (authorization_test names).
+Confirmed findings this pass: F-03, F-04, F-05, F-06.
+Reused evidence: format/compile/routes checks from Pass 1 (snapshot unchanged; not rerun).
+Weaknesses tested by existing tests (not executed by me): tenancy_test "database RLS denies unscoped reads and writes", authorization_test CSRF and forged-session tests. These are credible test names, not verified execution.
+Hypotheses: none new. Retracted: none.
+
+Scores: func 68, sec 84, rel 78, ux 62, arch 80, test 72, perf 75, deploy 78 -> 75.05 -> 75.
+Confidence: High for static auth/isolation design; Low for runtime. Readiness: NOT READY for production; isolation is strong where RLS applies, weaker for global identity tables (F-03).
+New/confirmed/revised/retracted: new 3 (F-03,F-04,F-06), confirmed 1 (F-05), revised 0, retracted 0.
+
+## Pass 3 - Collection, SSRF and read-only boundaries (fresh)
+
+Snapshot: unchanged; no drift. Angle emphasis: outbound reads cannot be redirected to internal targets or mutated.
+
+Fresh code inspected: source_config.ex, operation_policy.ex, transport.ex, budgets.ex, azure_build.ex, telemetry_collection.ex, kubernetes.ex, kubernetes_watcher.ex, metrics.ex, logs.ex, workloads.ex, workload_collection.ex, collection.ex, evidence.ex, configuration.ex.
+
+Critical paths traced:
+- SSRF defenses: Transport.get forbids network inside a transaction, re-fetches trusted config, reserves budget, and pins the approved IP while sending the original Host for TLS verification; path is allowlisted, redirects/retries/decompression disabled, response capped (transport.ex:3-97). OperationPolicy restricts each kind to exact paths (operation_policy.ex:3-12). Credentials come only from environment and reject CR/LF (transport.ex credentials).
+- Config trust: SourceConfig.validate enforces https, no userinfo/query/fragment, endpoint in approved_origins, network_reviewed, approved_ips, bounded intervals/bytes/pages/windows/retention, per-kind profiles (source_config.ex:20-48 and kind_valid clauses).
+- Read-only adapters: AzureBuild only GETs builds/timeline/logs with api-version 7.1 and bounded line ranges (azure_build.ex); normalize drops out-of-scope project/definition/run; no POST/PATCH anywhere in the adapter.
+- Budgets concurrency: single-flight reservation with FOR UPDATE, in_flight_until and per-minute request ceiling; HTTP never holds the transaction (budgets.ex:5-57).
+- Telemetry checkpoints: contiguous bounded windows from a durable collection_states checkpoint; stale-lease fence check before persisting; explicit coverage=catching_up/partial rather than silent gaps (telemetry_collection.ex:26-46,121-,persist).
+- Kubernetes watcher is a supervised transient loop that runs only when collection_enabled (kubernetes_watcher.ex:16-28).
+
+Strengths: S-08 SSRF pin+Host verification+allowlist+byte cap; S-09 credential handling by env reference only; S-10 bounded, fenced, honest coverage.
+Confirmed findings: F-11 (live validation unavailable), plus F-08 (per-refresh cost) reinforced.
+Hypotheses: none new; the read-only claim is source-confirmed for adapters, but not runtime-validated.
+Retracted: none.
+Reused evidence: Pass 1 compile/routes/validators (snapshot unchanged; not rerun).
+
+Scores: func 69, sec 84, rel 79, ux 62, arch 80, test 72, perf 75, deploy 78 -> 75.40 -> 75.
+Confidence: High for SSRF design; Low for live-provider behavior.
+New/confirmed/revised/retracted: new 1 (F-11), confirmed 1 (F-08), revised 0, retracted 0.
+
+## Pass 4 - Job concurrency, fencing and restart recovery (fresh)
+
+Snapshot: unchanged; no drift. Angle emphasis: leases, uniqueness, retries, restart and Oban LifeLine recovery.
+
+Fresh code inspected: application.ex, config.exs Oban block, scheduler.ex, collection.ex (claim/fenced!/fail), telemetry_collection.ex (claim/finish_state), recovery.ex, evidence_worker.ex, notification_worker.ex, collection_worker.ex, maintenance_worker.ex, investigation_worker.ex, directory_maintenance_worker.ex, budgets.ex, operational_metrics.ex, health.ex, oidc/attempts.ex.
+
+Critical paths traced:
+- Leases/fences: both collection paths bump fence and lease_until under FOR UPDATE and re-verify fence/lease before persist (collection.ex claim/fenced!; telemetry_collection.ex:121-,persist_window); stale leases roll back (:stale_lease).
+- Job uniqueness: workers declare unique periods/fields/states; Oban peer Database; LifeLine rescue_after 10m (config.exs; workers).
+- Budget/queue backpressure: source_budgets single-flight; EvidenceWorker skips enqueue when >100 pending enrichment jobs and records Evidence.unavailable instead (collection.ex persist pending-count branch).
+- Ambiguous delivery: if a row is found in 'delivering' on re-claim it is marked 'ambiguous' and skipped; attempts cap 3; Retry-After honored with cap (notifications.ex claim/send_message).
+- Directory maintenance expires tokens/attempts and terminal Oban jobs in bounded batches with SKIP LOCKED (directory_maintenance_worker.ex).
+- Observability of jobs: OperationalMetrics attaches bounded-dimension Oban handlers; Health.measure and OperationalMetrics.measure run on a 10s telemetry poller (telemetry.ex, operational_metrics.ex).
+
+Strengths: S-11 fenced leases and restart-safe durable state; S-12 bounded queues/retries and ambiguous-outcome non-replay; S-13 bounded maintenance cleanup.
+Confirmed findings: F-07 (readiness), F-08 (refresh cost); F-01 confirmed again (release/preflight tests not in CI).
+Hypotheses: F-12 (global Oban metadata queries are intentional, bounded; no tenant leak observed).
+Retracted: none.
+Reused evidence: Pass 1 compile/routes/validators (snapshot unchanged; not rerun).
+
+Scores: func 69, sec 82, rel 80, ux 62, arch 80, test 73, perf 75, deploy 79 -> 75.35 -> 75.
+Confidence: Medium-high static; Low runtime concurrency. Readiness: NOT READY for production; no concurrency/restart test executed.
+New/confirmed/revised/retracted: new 0, confirmed 3 (F-01,F-07,F-08), revised 0, retracted 0.
+
+## Pass 5 - Evidence lineage, human review and audit integrity (fresh)
+
+Snapshot: unchanged; no drift. Angle emphasis: revision lineage, review transitions, append-only audit and truthful unavailable/expired states.
+
+Fresh code inspected: evidence.ex, issues.ex, issue_review.ex, lifecycle.ex, evaluations.ex, correlation.ex, fingerprints.ex, recovery.ex, replay.ex, replay_detectors.ex, retention.ex, redactor.ex, audit migration, runtime_grants.sql.
+
+Critical paths traced:
+- Evidence lineage: Evidence.save upserts by (company,source,evidence_key) and bounds payloads (evidence.ex:49-88); Issues.record serializes occurrences via advisory locks and creates append-only occurrence_evidence revisions; improved evidence links to the same occurrence rather than duplicating it (issues.ex record/create_occurrence/improve_occurrence).
+- Human review: IssueReview acquires FOR UPDATE on the group, re-resolves the actor AFTER the lock to catch revocation, enforces expected_revision, and inserts an audit event in the same transaction, rolling back the state change if the audit insert fails (issue_review.ex assign/unassign/review/snooze/mutate). Lifecycle is a pure transition policy (lifecycle.ex:15-77).
+- Audit immutability: audit table constraints enforce allowed actions, before>0 and after=before+1, bounded JSON keys, and RLS; migration 20260926061350 lines 9-53. Grants allow runtime SELECT/INSERT only and revoke UPDATE/DELETE/TRUNCATE (runtime_grants.sql lines 16-18).
+- Truthful unavailable state: Issues.evidence returns {status:expired} once expires_at passed and does not fabricate data (issues.ex evidence); retention tombstones evidence with {expired:true,reason:retention} (retention.ex expire_evidence/sweep); Recovery requires comparable successful evidence, not quiet time (recovery.ex).
+- Redaction: Redactor handles quoted-first assignment secrets, unterminated quotes redact to end, bounded input, invalid UTF-8, JWTs, URLs, PEM keys (redactor.ex).
+- Correlation is explicitly candidate-not-cause with counterevidence and missing-input honesty (correlation.ex).
+
+Strengths: S-14 transactional revision-checked review with actor revalidation; S-15 append-only audit with DB constraints and least-privilege grants; S-16 honest expired/unavailable semantics; S-17 redaction robustness.
+Confirmed findings: F-02 (grants divergence), F-09 (operations_live size), F-10 (DB blocker).
+Hypotheses: none new.
+Retracted: none.
+Reused evidence: Pass 1 compile/routes/validators (snapshot unchanged; not rerun).
+
+Scores: func 70, sec 82, rel 80, ux 63, arch 80, test 73, perf 75, deploy 79 -> 75.65 -> 76.
+Confidence: Medium-high static; Low runtime. Readiness: NOT READY for production; audit/lineage design is a notable strength.
+New/confirmed/revised/retracted: new 0, confirmed 3 (F-02,F-09,F-10), revised 0, retracted 0.
+
+## Consolidated strengths worth preserving
+
+- S-01..S-04 (baseline gating, startup DB safety, fail-closed config, demo isolation).
+- S-05..S-07 (identity/OIDC/session controls; nested-scope rejection; membership rechecks).
+- S-08..S-10 (SSRF pin/host verification/allowlist; env-only credentials; bounded fenced collection with honest coverage).
+- S-11..S-13 (fenced leases; bounded queues and ambiguous-outcome handling; bounded maintenance).
+- S-14..S-17 (transactional review+audit; append-only audit grants; honest expiry/unavailable; redaction).
+
+## Top weaknesses (batch 1)
+
+1. F-10 verification blocker: 260 tests unrun here; no verified disposable DB.
+2. F-01 release-contract tests excluded from CI.
+3. F-03 global identity tables outside RLS.
+4. F-02 diverging grant definitions.
+5. F-08 unmeasured 10s full-reload LiveView cost; F-07 missing readiness endpoint.
+
+## Batch-1 recommendations (no implementation performed)
+
+Immediate: run the full suite on a verified disposable DB (F-10); add release-contract tests to CI (F-01); unify grants (F-02).
+Next: readiness endpoint (F-07); shared/documented login limiting (F-04); confirm dev auto-login default off for non-local dev (F-05).
+Later: RLS coverage for identity tables (F-03); OperationsLive refresh strategy and module split (F-08, F-09); per-deployment salts (F-06).
+
+## Batch-1 completion status
+
+Passes completed: 5 of 35 (Passes 1-5). Characterization: 1-10 initial full reviews; 11-30 varied-angle; 31-35 final cross-checks.
+All eight categories were scored each pass; weighted arithmetic is shown and verified. Historical claims preserved; nothing retracted or deleted. Only findings1 was created.
+Awaiting Main acceptance before Passes 6-10.
+
+
+---
+
+# Batch-1 revision addendum (Main report-9163dabc-3f48-427f-9ee9-b8e5d3a6b8fc)
+
+This addendum preserves every earlier claim (no deletion) and records corrected dispositions after Main review and additional source tracing. Later passes must treat the corrected dispositions here as authoritative.
+
+## Corrections applied (with evidence)
+
+- F-06 RETRACTED (was Low security hygiene). Fixed, public, purpose-specific salts are standard Phoenix practice; endpoint.ex:10-11 pairs them with the deployment-unique secret_key_base. No key reuse, weak-key, or domain-separation failure is evidenced. Corrected disposition: NOT A DEFECT. Recommendation withdrawn.
+- F-02 REVISED to Low (maintainability only). The two files differ textually (ops_brain/priv/repo/runtime_grants.sql vs ops_brain/rel/runtime-grants.sql) but no concrete incorrect effective privilege for ops_brain_runtime was found: both grant USAGE, SELECT on all sequences (priv line 19; rel lines 18 and 35), both grant SELECT/INSERT-only on issue_audit_events and revoke UPDATE/DELETE/TRUNCATE, both withhold UPDATE on observation_revisions, and both grant the same source-table DML. Differences are intentional hardening in the release variant: an explicit approved-database + ops_brain_migrator identity guard, revoke-all-first, and an added ops_brain_backup read-only role (rel lines 1-41). Corrected disposition: residual LOW risk that two hand-maintained files silently diverge; not a proven privilege defect. Fix reduced to "single source of truth or a parity test", effort S.
+- F-03 KEPT as an explicit defense-in-depth tradeoff, NOT a defect. Operator-facing identity/membership consumers were traced and are all membership-scoped: Tenancy.list_companies joins memberships and filters by operator (tenancy.ex:14-21); Tenancy.authorize requires an existing membership row (tenancy.ex:29-31); company/source reads are id-and-company bound (tenancy.ex:62, 88-90); CompanyLive/PortfolioLive only navigate within current_scope.company_id (company_live.ex:31, operations_live.ex:51-62). No unauthorized cross-company reachability was demonstrated. Tenant RLS on identity tables is therefore NOT recommended as a fix; remaining note is optional hardening only.
+- F-07 REVISED to intentional design, NOT an open defect. Readiness exists as a separate read-only release preflight that verifies runtime role/DDL privileges, forced RLS, and migration-version parity (ops_brain/rel/overlays/ops/preflight.exs:10-45), and it is enforced before workers start (ops_brain/rel/overlays/bin/release-command:28-33). Liveness is a real 200 check against /sign-in, not an invented route (ops_brain/rel/overlays/bin/healthcheck:9). Residual optional note: there is no in-app HTTP readiness route; this is a design choice, not a missing safeguard.
+- F-10 RECLASSIFIED from product defect to environmental LIMITATION / verification blocker. It says nothing about product quality; it records that no verified disposable DB was available (localhost:55432 refused; test_helper.exs gates all tests on DatabaseSafety.verify! and Fixtures.verify_disposable!). Not counted as a defect.
+- F-11 RECLASSIFIED from defect to intentional LIMITATION. Collection/delivery/OIDC are disabled by default (config.exs gates; README disclaimer). Absence of live validation is an owner gate, not a defect.
+- F-12 CLEARED / NON-FINDING. As originally stated it explicitly found no leak; the bounded, non-tenant Oban dimensions are intentional (operational_metrics.ex:1-16, handle_event clauses). Marked resolved, not a hypothesis.
+- F-01 CONFIRMED High, now with precise citations: ci.yml runs compile/test/routes/config validation only (ci.yml:70-76) and rejects source/lock drift (ci.yml:77-78); the release-contract suites under ops_brain/rel/tests (runtime_contract_test.exs:62-142; test_release_contract.py:190-255; release_probe.exs:44) are never invoked by ci.yml. Not affected by the revisions.
+- F-04 CONFIRMED Medium (login_limiter.ex:28-43 single-node in-memory window).
+- F-05 CONFIRMED Low intentional-dev-risk (dev_auto_login.ex:20-50; dev.exs:20-24 default "true", operator "adam"). Not a production path (compile-gated @dev_build, dev_auto_login.ex:3).
+- F-08 CONFIRMED Medium unmeasured performance risk (operations_live.ex:6, 28-31, 211-328). Still not benchmarked; remains a risk, not a measured defect.
+- F-09 CONFIRMED Low/Medium maintainability (operations_live.ex is 908 lines; mixed concerns).
+
+## Corrected finding counts and defect tallies
+
+- Confirmed substantive findings after revision: F-01 (High), F-04 (Medium), F-08 (Medium risk, unmeasured), F-02 (Low maintainability), F-05 (Low, dev-only intentional risk), F-09 (Low/Medium maintainability). Total 6.
+- Defense-in-depth tradeoff (not defect): F-03.
+- Intentional design (not defect): F-07.
+- Limitations/blockers (not product defects): F-10, F-11.
+- Cleared/non-findings: F-06 (retracted), F-12 (cleared).
+- No new findings were invented; no historical claim was deleted.
+
+## Corrected scores and rationale for affected passes
+
+- Pass 2: security raised 84 -> 85 because F-06 is retracted and F-03 is a documented tradeoff rather than a defect. Recomputed: (68*20 + 85*20 + 78*15 + 62*10 + 80*10 + 72*10 + 75*5 + 78*10)/100 = 7525/100 = 75.25 -> 75. Overall unchanged.
+- Passes 1, 3, 4, 5: rationales/counts corrected (F-07/F-10/F-11/F-12 reclassification; F-02 downgrade) but category scores and overalls unchanged (75, 75, 75, 76), because the corrections shift labels more than substance.
+- Batch-1 corrected new/confirmed/revised/retracted tallies: Pass 1 new 4 (F-01,F-02,F-07,F-09) -> after revision F-07 is intentional, F-02 downgraded; Pass 2 new 3 (F-03,F-04,F-06) -> F-03 tradeoff, F-06 retracted; Pass 3 new 1 (F-11) -> limitation; Passes 4-5 new 0. Cumulative register remains F-01..F-12 with these dispositions.
+
+## Precise citation index added for material findings
+
+- F-01: .github/workflows/ci.yml:42-78; ops_brain/rel/tests/runtime_contract_test.exs:62,75,85,90,125,132,142; ops_brain/rel/tests/test_release_contract.py:190-255; ops_brain/rel/tests/release_probe.exs:44.
+- F-02: ops_brain/priv/repo/runtime_grants.sql:19; ops_brain/rel/runtime-grants.sql:1-41.
+- F-03: ops_brain/priv/repo/migrations/20260919135154_create_tenancy_foundation.exs:5-53 (no RLS) vs 74-83 (RLS loop); ops_brain/priv/repo/runtime_grants.sql:6; ops_brain/lib/ops_brain/tenancy.ex:14-21,29-31,62,88-90.
+- F-04: ops_brain/lib/ops_brain_web/login_limiter.ex:28-43.
+- F-05: ops_brain/lib/ops_brain_web/dev_auto_login.ex:3,20-50; ops_brain/config/dev.exs:20-24.
+- F-08: ops_brain/lib/ops_brain_web/live/operations_live.ex:6,28-31,211-328.
+- F-09: ops_brain/lib/ops_brain_web/live/operations_live.ex (908 lines).
+- F-10: ops_brain/test/test_helper.exs:3-4; ops_brain/test/support/fixtures.ex:9-33; ops_brain/config/runtime.exs:47-63.
+- F-11: ops_brain/config/config.exs (collection_enabled/maintenance_enabled/delivery_enabled false); README.md disclaimer.
+
+## Batch-1 completion status after revision
+
+Passes completed: 5 of 35 (unchanged). Corrected overall scores: Pass 1 75, Pass 2 75, Pass 3 75, Pass 4 75, Pass 5 76. Production readiness verdict unchanged: NOT READY for production (per README/live gates and unrun DB suite). Confidence: Medium-high static, Low runtime.
+
+Awaiting Main acceptance before Passes 6-10.
+
+
+---
+
+# Batch-1 revision addendum 2 (Main report-9513aab0-6387-4723-8eab-9620d65067e8)
+
+Preserves all prior text; corrects two remaining accuracy gaps. No implementation change, no DB test executed.
+
+## F-02 corrected: bounded source comparison, not proven equivalence
+
+The earlier addendum's claim that both scripts confer the same effective ops_brain_runtime privileges was too strong and is superseded. A bounded line-by-line source comparison shows the release script applies materially more restrictive/preparatory statements than the CI script, so identical listed table DML does not establish identical effective access, especially with pre-existing grants or default PUBLIC rights:
+
+- ops_brain/rel/runtime-grants.sql:1-15 requires -v approved_database and current_user='ops_brain_migrator' before doing anything; priv/repo/runtime_grants.sql:1-4 has no such guard.
+- rel:17-19 revokes ALL on ALL TABLES, ALL SEQUENCES, and ALL FUNCTIONS from ops_brain_runtime (and functions from PUBLIC); priv has no revoke-all and only does targeted REVOKE/GRANT (priv:11,14,17).
+- rel:36 additionally grants USAGE on TYPE public.oban_job_state; priv has no type grant.
+- rel:37-38 grants ops_brain_backup read access; priv has no backup role.
+- rel:20-35 and priv:6-19 list overlapping runtime table/sequence DML, but that overlap alone is not evidence of identical effective privileges.
+
+Corrected disposition: F-02 remains a LOW, UNPROVEN risk (two hand-maintained grant definitions can diverge; the release variant is stricter and adds an identity guard, function revokes, a type grant and a backup role). Actual effective privilege parity was NOT DB-tested and is not claimed. Fix: single reviewed source of truth or a parity contract test; effort S. This does not upgrade F-02 to a confirmed bug.
+
+## F-07 corrected: three distinct layers, ongoing readiness not demonstrated
+
+The earlier addendum's "intentional design, not an open defect" was too final. Evidence supports three separate layers:
+
+1. Startup DB/schema/role/migration validation: PRESENT. ops_brain/rel/overlays/ops/preflight.exs:10-45 verifies the runtime role is not owner/BYPASSRLS, forced RLS via DatabaseSafety.verify!, DDL/database ownership absence, and exact migration-version parity; ops_brain/rel/overlays/bin/release-command:28-33 runs it before starting workers.
+2. Liveness HTTP probe: PRESENT. ops_brain/rel/overlays/bin/healthcheck:9 checks that GET /sign-in returns 200 (deliberately no invented /health route).
+3. Ongoing, DB-aware readiness after startup: NOT DEMONSTRATED. preflight runs only at start, and there is no in-app /health route (mix phx.routes listing; router.ex:31-46). A post-start database failure is surfaced only indirectly through telemetry gauges (telemetry.ex:15,96-99; health.ex) and would not flip a readiness signal.
+
+Corrected disposition: F-07 is a nuanced OPERATIONAL LIMITATION, not a defect by itself and not fully solved. Lack of a /health route alone is not a defect. Recorded recommendation (unchanged in substance, now bounded): optionally expose a readiness signal that checks Repo; do not treat startup preflight as ongoing readiness. Effort S; confidence Medium.
+
+## Register and counts unchanged by this addendum
+
+Confirmed substantive findings remain 6 (F-01 High; F-04, F-08 Medium; F-02, F-05, F-09 Low). F-03 tradeoff; F-07 limitation; F-10/F-11 limitations; F-06/F-12 cleared. Pass scores unchanged: 75, 75, 75, 75, 76. Production readiness: NOT READY.
+
+## Batch-1 completion status (after addendum 2)
+
+Passes completed: 5 of 35. Awaiting Main acceptance before Passes 6-10.
+
+
+---
+
+# Batch-2: passes 6-10 of 35 (initial full reviews, additional angles)
+
+Snapshot for passes 6-10: HEAD 33dea0b74ccda530306495941b74f20997369bae; working tree unchanged (37 entries; only findings1 added). No drift. Scores below are PROVISIONAL judgment, not certification; no DB or runtime test was executed. Aggregate language: "findings and risks".
+
+## Register additions/changes in batch 2
+
+- F-13 (Low, product validation gap, NEW): notification sink config validation (Notifications.approved?, notifications.ex:83-93; configuration.ex:42) does not require approved_urls, approved_ip, or https/scheme/shape, but send_message requires all of them (notifications.ex:236-245) and returns :rejected. A sink can pass deployment config load yet never deliver, with only a per-row rejected status (notifications.ex:281-282). Fail-closed, so impact is silent non-delivery, not a security breach. Fix: extend approved?/config validation to the same prerequisites send_message enforces, or reject config at load. Regression: config with an approved sink lacking approved_urls/approved_ip fails load. Effort S. Confidence High (static).
+- F-14 (Low, latent accessibility, NEW): the shared table component renders header cells without scope (core_components.ex:378-382). Current operator pages use their own tables with scope="col" (demo_live.ex:255-258) so user impact is latent, not active. Fix: add scope="col"/sr-only semantics to the shared component. Effort S. Confidence High (static); no runtime screen-reader check.
+- F-04/F-08 remain risks (not proven defects). F-02 remains unproven parity. F-01 unchanged High. F-03 tradeoff. F-05 dev-only. F-07 nuance. F-10/F-11 limitations. F-06/F-12 cleared.
+- Observation (not a finding): Retention.expire_evidence/2 (retention.ex:294) has no callers under lib; it is a company-scoped, bounded helper that currently has no UI/worker entry point. No security effect demonstrated; noted only.
+
+## Per-pass provisional coverage and score table (batch 2)
+
+| Pass | angle | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|-------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 6 | notifications/ambiguous outcomes | 71 | 82 | 80 | 63 | 80 | 73 | 75 | 79 | 75.85 | 76 |
+| 7 | retention/replay/database safety | 72 | 83 | 81 | 63 | 81 | 73 | 75 | 79 | 76.50 | 77 |
+| 8 | UX/accessibility/truthful health | 71 | 82 | 80 | 66 | 80 | 73 | 75 | 79 | 76.15 | 76 |
+| 9 | performance/release/observability | 71 | 82 | 80 | 66 | 80 | 73 | 76 | 81 | 76.40 | 76 |
+| 10 | cross-cutting revalidation | 72 | 83 | 81 | 66 | 81 | 74 | 76 | 81 | 77.15 | 77 |
+
+Worked example Pass 6: (71*20 + 82*20 + 80*15 + 63*10 + 80*10 + 73*10 + 75*5 + 79*10)/100 = 7585/100 = 75.85 -> 76.
+
+## Pass 6 - Notifications and ambiguous outcomes (fresh)
+
+Fresh code inspected: notifications.ex, notification_worker.ex, notification_outcomes_test.exs, notification_revision_test.exs, add_notification_outbox migration, config.exs gates, OutCome/recovery coupling.
+
+Critical paths traced: prepare creates one pending row per (group,destination,revision) with a unique delivery_identity index (migration:18-20) and enqueues a NotificationWorker at the computed digest/cooldown/quiet time; deliver requires delivery_enabled, claims with FOR UPDATE and issue-group lock, rechecks approval, classifies ambiguous prior attempts, coalesces superseded revisions, and sends with idempotency-key, pinned IP and original Host; 200s delivered, 429 retry bounded by Retry-After, 400/401/403/404 rejected, everything else ambiguous and not auto-replayed (notifications.ex:83-290). NotificationWorker snoozes on delivery_disabled/not_due and discards otherwise (notification_worker.ex:9-16).
+
+Strengths (path:line): S-18 stable delivery identity + unique index (migration:18-20); S-19 ambiguous never auto-replayed and retry cap 3 (notifications.ex:139-165, 274-286); S-20 idempotency-key + pinned IP + approved_urls/approved_ip + credential isolation from sources (notifications.ex:83-93, 236-256); S-21 local review edits do not create replacement deliveries and do not drop the pending one (notifications.ex:167-183).
+Weaknesses/risks: F-13 (config validation vs delivery prerequisites), F-08 (delivery queue single worker but bounded).
+Test outcomes: notification_outcomes_test.exs source shows stable-identity, retry-exhausted, ambiguous-no-replay and snooze cases (lines cited); NOT EXECUTED (F-10 blocker). The 260 test definitions are source, not executed tests.
+Reused evidence: Pass 1 compile/routes (snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low runtime. New 1 (F-13); confirmed 0; revised 0; retracted 0. Recommendation: align config validation with send prerequisites.
+
+## Pass 7 - Retention, replay and database safety (fresh)
+
+Fresh code inspected: retention.ex, replay.ex, replay_detectors.ex, replay_retention_test.exs, retention_policy_test.exs, database_safety.ex, preflight.exs, both grant scripts, migration 20260920120000.
+
+Critical paths traced: sweep persists reviewed policy onto durable source rows independent of current config, resolves company scope, refuses nested scope, refuses to guess when policy unknown, defers under live writers, sets statement/lock timeouts, tombstones (not deletes) evidence into {expired:true,reason:retention}, and leaves protected dependencies (replay.ex:6-58 uses separate event/knowledge cutoffs, binding-bound cursors, absent==invisible, expired inputs unavailable; replay_detectors.ex gates version and marks malformed/expired as unavailable rather than successful empty). DatabaseSafety requires 17 forced-RLS tables and append-only audit grants (database_safety.ex:9-52); preflight adds role/DDL/migration-version checks (preflight.exs:10-45).
+
+Strengths: S-22 read-only, version-gated replay over retained sanitized inputs with honest unavailable states (replay_detectors.ex:14-38, correlate); S-23 policy survives disabled/removed config and never guesses (retention.ex:10-49, 89-99); S-24 bounded cleanup with skip-locked batches and live-writer guard (retention.ex run_sweep/active_writer?); S-25 startup + preflight safety gates.
+Weaknesses/risks: F-02 unproven parity; F-07 ongoing readiness nuance; F-10 blocker.
+Test outcomes: retention/replay test files exist; NOT EXECUTED. Static tracing only.
+Reused evidence: Pass 1 compile/routes (snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low runtime. New 0; confirmed 2 (F-02,F-07 nuance); revised 0; retracted 0.
+
+## Pass 8 - UX, accessibility and truthful health states (fresh)
+
+Fresh code inspected: ui.ex, layouts.ex, core_components.ex, operations_live.ex render, portfolio_live.ex, company_live.ex, demo_live.ex, demo.ex/dataset.ex, error_html.ex, issues.ex evidence semantics.
+
+Critical paths traced: status labels are stored-fact summaries with explicit "not current incidents"/"not normal" hints (ui.ex summaries blocks); expired evidence is rendered as {status:expired} (issues.ex evidence/revisions); synthetic demo carries a role="note" banner and is limited to the reserved company (layouts.ex demo-banner; demo.ex company?/reserved_company!); navigation has aria-labels/aria-current, a role="status" connection banner, main tabindex=-1 and a footer "Unknown is never healthy" (layouts.ex app/1).
+Strengths: S-26 no fabricated healthy state; unknown/expired/partial are explicit (ui.ex, issues.ex, telemetry_collection coverage states); S-27 demo isolation and clear synthetic labeling (layouts.ex, demo.ex); S-28 baseline a11y semantics present (32 aria/role/scope/label markers across live/components; layouts.ex).
+Weaknesses/risks: F-14 (shared table component lacks scope; latent because pages use their own scoped tables); F-08 refresh indicator visible but cost unmeasured. Accessibility/runtime visual behavior is UNVERIFIED: no browser/screen reader was used; no visual claims are made.
+Test outcomes: console_ui_test.exs and workspace_home_test.exs exist; NOT EXECUTED.
+Reused evidence: Pass 1 compile/routes (snapshot unchanged; not rerun).
+Confidence: Medium static; Low for runtime accessibility. New 1 (F-14); confirmed 0; revised 0; retracted 0.
+
+## Pass 9 - Performance, release configuration and observability (fresh)
+
+Fresh code inspected: Dockerfile, rel/roles.sql, rel/runtime-grants.sql, rel/env.sh.eex, rel/Caddyfile.example, rel/overlays (healthcheck, release-command, preflight, migrate), docs/DEPLOYMENT.md, config/runtime.exs, telemetry.ex, operational_metrics.ex, health.ex, add_operations_read_indexes migration, operations_live/pipeline_runs SQL, fixtures cleanup.
+
+Critical paths traced: container runs as non-root 10001 with no EXPOSE, keeps the loopback listener, and a 60s healthcheck (Dockerfile:30-40); release-command requires explicit start/migrate approval and file-based secrets of minimum length, refuses arbitrary commands, and runs preflight before start (release-command:1-36); roles.sql creates NOLOGIN/NOINHERIT/NOBYPASSRLS runtime+migrator and a separate BYPASSRLS backup role, revokes PUBLIC and EXECUTE defaults, and keeps DB ownership with the DBA (roles.sql:19-41); bounded queries use LIMIT and a MATERIALIZED run CTE with operations-read indexes (operations_live.ex:304-329; add_operations_read_indexes migration); telemetry exposes bounded gauges on a 10s poller and never subscribes raw tenant-bearing events (telemetry.ex:15,60-99; operational_metrics.ex:1-16).
+Strengths: S-29 hardened release/role/proxy posture; S-30 bounded queries + targeted indexes; S-31 bounded, redacted observability; S-32 documented and separately-tested backup/restore drill procedure (DEPLOYMENT.md).
+Weaknesses/risks: F-01 release tests not in CI; F-08 unmeasured LiveView refresh cost; F-02 grant divergence; Docker base uses a mutable tag with no pinned digest (documented as not a reproducibility guarantee — limitation, not defect).
+Test outcomes: release contract tests exist (runtime_contract_test.exs 7 tests; test_release_contract.py; release_probe.exs) but are NOT run by CI (F-01) and were NOT executed here.
+Reused evidence: Pass 1 compile/routes (snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low runtime. New 0; confirmed 1 (F-01); revised 0; retracted 0.
+
+## Pass 10 - Cross-cutting revalidation of the first ten passes (fresh)
+
+Fresh re-read: router.ex, endpoint.ex, application.ex, database_safety.ex, tenancy.ex, operator_auth.ex, oidc.ex + submodules, transport.ex, source_config.ex, operation_policy.ex, budgets.ex, collection.ex, telemetry_collection.ex, issues.ex, issue_review.ex, notifications.ex, retention.ex, recovery.ex, replay.ex, scheduler.ex, workers, ui.ex, layouts.ex, migrations, grants, ci.yml, rel/*.
+
+Revalidation results:
+- Protected-table set vs migrations: @protected_tables (database_safety.ex:9-15) enumerates 17 tables; the RLS loops cover environments/sources (foundation:74-83), collection_states/pipeline_runs/run_snapshots (durable:64-69), evidence_items/error_fingerprints/issue_groups/failure_occurrences (evidence:72-77), service_instances/observation_windows/source_budgets (windows:64-69), observation_revisions/kubernetes_cursors (replay:47-52), notification_outbox (outbox:26-29), occurrence_evidence (revisions:49-51,69), issue_audit_events (audit:50-53) = 17. Match confirmed.
+- Route list matches router.ex; no /health route; single-workspace navigation only under /companies/:company_id.
+- Register consistency: F-01 High; F-02/F-04/F-05/F-08/F-09/F-13/F-14 risks (severity as labelled); F-03 tradeoff; F-07/F-10/F-11 limitations; F-06/F-12 cleared. No duplicate IDs; no contradictory dispositions.
+- Scores shift modestly upward (Pass 10 overall 77) because additional strengths were traced in replay, release hardening and truthful-health UX; F-13/F-14 are low. All scores remain provisional and no DB/runtime evidence exists.
+Strengths: S-33 strong cross-cutting defensiveness with few cross-module contradictions found on re-read.
+Weaknesses/risks: F-01, F-02, F-04, F-05, F-08, F-09, F-13, F-14.
+Test outcomes: none executed (F-10). Reused evidence: all batch-1 checks (Passes 1-5 labels) and batch-2 static reads; no rerun claimed.
+Confidence: Medium-high static; Low runtime. New 0; confirmed 8 risks; revised 0; retracted 0.
+
+## Cumulative score table (passes 1-10, provisional)
+
+| Pass | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|------|---|----|----|----|----|----|----|----|----|----|
+| overall | 75 | 75 | 75 | 75 | 76 | 76 | 77 | 76 | 76 | 77 |
+
+## Batch-2 completion status
+
+Passes completed: 10 of 35. All eight categories scored each pass; arithmetic checked. Historical text, corrections and cleared items preserved. Only findings1 changed. Awaiting Main acceptance before passes 11-15.
+
+---
+
+# Batch-2 revision addendum (Main report-9f909b96-4a67-4e20-8f4c-fdfe495b47ff)
+
+Preserves all prior text. Reporting corrections only; no implementation change, no DB test, no runtime check.
+
+## F-13 corrected: validation mismatch is real, but delivery failure is visible, not silent
+
+The claim that a sink can silently never deliver is withdrawn. Traced end to end:
+
+- Acceptance (config load): configuration.ex:38-42 rejects an enabled sink only when placeholder?(s) is true or Notifications.approved?(s, company) is false. placeholder? flags REPLACE_/replace-/.invalid and TEST-NET IPs (configuration.ex:71-79). approved? checks approved/enabled/company/url binary/credential_env/credential not shared with a source/quiet-hours/cooldown/digest (notifications.ex:83-93). It does NOT require approved_urls, approved_ip, or an https/no-query URL shape.
+- Minimal non-placeholder example that passes load (synthetic values only, no credentials or traffic): an enabled, approved sink object with company_id set to an existing company UUID, url https://sink.example.test/notice, credential_env APPROVED_SINK_TOKEN, quiet_utc_hours empty, cooldown_seconds 300, digest_seconds 60. It has no REPLACE_/replace-/.invalid token and no TEST-NET IP, and satisfies every approved? clause.
+- Rejection at send: send_message requires https with no userinfo/query/fragment, requires the url to be a member of approved_urls (defaults to an empty list), and requires a parseable approved_ip (notifications.ex:236-239). With approved_urls absent the check fails and returns :rejected (notifications.ex:287-289).
+- Persistence: deliver/2 writes the returned status to notification_outbox (notifications.ex:130-135).
+- UI visibility: the finding Evidence workspace loads Notifications.status/2 (operations_live.ex:131; notifications.ex:219-230) and renders Local notification state rows with destination/status/attempts (operations_live.ex:822-833).
+
+Corrected disposition: F-13 remains a Low, source-confirmed product validation gap: deployment config accepts a sink that can never pass delivery prerequisites. It is a fail-closed non-delivery with a persisted, operator-visible rejected status, not a security breach and not silent. Recommended (non-mandatory) fix: extend approved?/config validation to the same prerequisites send_message enforces. Regression: a load-time validator rejects an enabled sink with empty approved_urls. No runtime validator probe was run (would require app boot/DB); the trace above is source-only.
+
+## F-14 corrected: optional semantic explicitness, not a confirmed accessibility error
+
+The earlier entry overstated this as a defect. In a simple single-row thead, header cells can be associated with columns implicitly, so a missing scope is not by itself proof of inaccessible headers. A consumer search found no production use of the shared table component (the shared component appears only in its own documentation example, core_components.ex:348); operator pages render their own tables with scope="col" (demo_live.ex:255-258). Corrected disposition: F-14 is an OPTIONAL semantic-explicitness improvement / unverified accessibility risk, not a confirmed error. No sr-only or other change is prescribed, and the existing sr-only usage for Actions (core_components.ex:380) is left as-is. No screen-reader/runtime test was performed.
+
+## F-08 citation correction in Pass 6
+
+Pass 6 weakness line that associated F-08 with delivery queue single worker but bounded was an unsupported cross-reference and is withdrawn. F-08 is solely the OperationsLive full-poll-per-socket risk (operations_live.ex:6,28-31,211-328). No distinct delivery-queue risk was evidenced, so none is assigned.
+
+## Batch-2 completion status after correction
+
+Passes completed: 10 of 35. Provisional scores unchanged: 76, 77, 76, 76, 77 for passes 6-10. Register: 8 findings and risks (F-01 High; F-04/F-08 Medium; F-02/F-05/F-09/F-13/F-14 Low), F-03 tradeoff, F-07/F-10/F-11 limitations, F-06/F-12 cleared. Awaiting Main acceptance before passes 11-15.
+
+---
+
+# Batch-3: passes 11-15 of 35 (varied-angle adversarial reviews)
+
+Snapshot: HEAD 33dea0b74ccda530306495941b74f20997369bae; only findings1 changed; no app/config/test drift. Scores PROVISIONAL.
+
+## Reproducible isolated probe evidence (batch 3)
+
+Environment: ops_brain directory; mix on PATH at /opt/homebrew/bin/mix; project targets Elixir 1.20.4 / OTP 27 (ops_brain/mise.toml); MIX_ENV default dev; app NOT started and no database used.
+Command form: mix run --no-start -e (program below). Exit code 0. The app was not started (--no-start), so no Repo, Oban, endpoint or collector ran. No provider was contacted.
+
+Exact program (single -e argument, newlines preserved):
+
+alias OpsBrain.{OperationPolicy, OIDC, Transport, SourceConfig, Lifecycle}
+r = []
+r = r ++ [{:policy_valid, OperationPolicy.allowed?(%{kind: "azure_build", organization: "org", project_id: "proj"}, "/org/proj/_apis/build/builds")}]
+r = r ++ [{:policy_traversal, OperationPolicy.allowed?(%{kind: "azure_build", organization: "org", project_id: "proj"}, "/org/proj/_apis/build/builds/../x")}]
+r = r ++ [{:policy_other, OperationPolicy.allowed?(%{kind: "azure_build", organization: "org", project_id: "proj"}, "/other")}]
+r = r ++ [{:prom_query, OperationPolicy.allowed?(%{kind: "prometheus"}, "/api/v1/query")}]
+r = r ++ [{:prom_admin, OperationPolicy.allowed?(%{kind: "prometheus"}, "/api/v1/admin")}]
+r = r ++ [{:https_ok, OIDC.Config.https_endpoint?("https://issuer.example.test")}]
+r = r ++ [{:http_bad, OIDC.Config.https_endpoint?("http://issuer.example.test")}]
+r = r ++ [{:query_bad, OIDC.Config.https_endpoint?("https://issuer.example.test/?q=1")}]
+r = r ++ [{:userinfo_bad, OIDC.Config.https_endpoint?("https://u:p@issuer.example.test")}]
+r = r ++ [{:uuid_bad, Ecto.UUID.cast("not-a-uuid")}]
+r = r ++ [{:uuid_ok, match?({:ok, _}, Ecto.UUID.cast("00000000-0000-4000-8000-000000000001"))}]
+r = r ++ [{:tx_new_close, Lifecycle.review_status("new", "closed_by_reviewer")}]
+r = r ++ [{:tx_closed_quiet, Lifecycle.review_status("closed_by_reviewer", "quiet")}]
+r = r ++ [{:retry_num, Transport.retry_seconds(%{"retry-after" => ["120"]}, DateTime.utc_now())}]
+r = r ++ [{:retry_cap, Transport.retry_seconds(%{"retry-after" => ["999999999"]}, DateTime.utc_now())}]
+r = r ++ [{:retry_junk, Transport.retry_seconds(%{"retry-after" => ["garbage"]}, DateTime.utc_now())}]
+IO.inspect(r, limit: :infinity)
+
+Expected and actual output (identical): policy_valid true; policy_traversal false; policy_other false; prom_query true; prom_admin false; https_ok true; http_bad false; query_bad false; userinfo_bad false; uuid_bad :error; uuid_ok true; tx_new_close {:ok, "closed_by_reviewer"}; tx_closed_quiet {:error, :invalid_transition}; retry_num 120; retry_cap 86400; retry_junk 60. These prove behavior of the named pure functions on these inputs only; they do not prove route/auth/network/DB end-to-end behavior.
+
+| Pass | angle | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|-------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 11 | unauthenticated outsider | 72 | 84 | 81 | 66 | 81 | 74 | 76 | 81 | 77.35 | 77 |
+| 12 | malicious operator / ID tampering | 72 | 85 | 81 | 66 | 81 | 74 | 76 | 81 | 77.55 | 78 |
+| 13 | cross-company RLS/query/job isolation | 72 | 85 | 82 | 66 | 82 | 74 | 76 | 81 | 77.80 | 78 |
+| 14 | OIDC/session replay, expiry, revocation | 72 | 85 | 81 | 66 | 81 | 74 | 76 | 81 | 77.55 | 78 |
+| 15 | SSRF/DNS/TLS/redirect adversary | 72 | 85 | 81 | 66 | 82 | 74 | 76 | 81 | 77.65 | 78 |
+
+Worked example Pass 11: (72*20 + 84*20 + 81*15 + 66*10 + 81*10 + 74*10 + 76*5 + 81*10)/100 = 7735/100 = 77.35 -> 77.
+
+## Pass 11 - Unauthenticated outsider threat model (fresh)
+
+Fresh code inspected: router.ex, endpoint.ex, session_controller.ex, session_html.ex, oidc_controller.ex, login_limiter.ex, operator_auth.ex, error_html.ex, error_json.ex, layouts.ex, config/prod.exs, config/runtime.exs.
+
+Critical paths traced: unauthenticated reachable surface is exactly GET/POST /sign-in, POST /auth/oidc, GET /auth/oidc/callback, DELETE /sign-out (router.ex:24-29); every other route is behind :authenticated plus an on_mount require hook (router.ex:31-46; operator_auth.ex:17-46). Session cookie is encrypted/signed, http_only, same_site Strict, secure true in prod (endpoint.ex:7-16; prod.exs:3); CSRF is enforced by protect_from_forgery (router.ex:11). Sign-in errors are generic and do not echo the token (session_html.ex failed branch; session_controller.ex:23-28). Error pages render only status messages (error_html.ex:21-23; error_json.ex:18-20). No registration route exists.
+
+Strengths: S-34 minimal unauthenticated surface + generic errors + no registration; S-35 fail-closed auth pipeline.
+Weaknesses/risks: F-04 (single-node login limiter), F-01, F-10/F-11 limitations.
+Probe evidence: uuid_bad :error; sign-in token parsing requires a 43-char base64 hash of 32 random bytes (accounts.ex:86-93).
+Reused evidence: batch-1 compile/routes/format (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low runtime. New 0; confirmed 2 (F-04, F-01); revised 0; retracted 0.
+
+## Pass 12 - Malicious authenticated operator and ID tampering (fresh)
+
+Fresh code inspected: operator_auth.ex, tenancy.ex, operations_live.ex, company_live.ex, issue_review.ex, lifecycle.ex, issues.ex, redactor.ex, replay.ex options.
+
+Critical paths traced: every company id is cast with Ecto.UUID.cast and re-checked against membership (tenancy.ex:25-36, 84-97); LiveView handle_params re-loads company in scope and handle_event re-checks using current_scope (operator_auth.ex:40-46; operations_live.ex:34-63). Local actions require expected_revision, lock the row FOR UPDATE, re-resolve the actor after the lock, and reject stale revisions (issue_review.ex revision/mutate/actor!). Review transitions are a strict pure whitelist (lifecycle.ex:64-77). Search input is sliced to 100 chars (operations_live.ex:68).
+
+Strengths: S-36 ID tampering fails on UUID cast + membership; S-37 revision-fenced review with reauthorization; S-38 bounded, validated inputs.
+Weaknesses/risks: F-08, F-09.
+Probe evidence: uuid_bad :error; tx_new_close {:ok, "closed_by_reviewer"}; tx_closed_quiet {:error, :invalid_transition}.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low runtime. New 0; confirmed 2 (F-08, F-09); revised 0; retracted 0.
+
+## Pass 13 - Cross-company RLS/query/job isolation (fresh)
+
+Fresh code inspected: database_safety.ex, tenancy.ex, migrations (all RLS loops), both grant scripts, collection.ex, telemetry_collection.ex, source_config.ex, budgets.ex, workers, notifications.ex, retention.ex.
+
+Critical paths traced: 17 operational tables have ENABLE+FORCE RLS with a company_scope policy (foundation:74-83; durable:64-69; evidence:72-77; windows:64-69; outbox:26-29; replay:47-52; revisions:49-51,69; audit:50-53) and DatabaseSafety refuses to start unless all 17 are forced and audit grants are append-only (database_safety.ex:19-52). Operator reads run inside with_scope, which re-authorizes, rejects nested scopes and sets the transaction-local company (tenancy.ex:38-56). Jobs carry only a source_id; workers re-resolve company via SourceConfig.transaction, which re-reads trusted config and verifies the persisted source company/kind before setting scope (source_config.ex transaction; budgets.ex:5-57; notification_worker.ex:9-16; evidence_worker.ex:12-16).
+
+Strengths: S-39 forced RLS on every tenant table + startup gate; S-40 jobs cannot carry caller-supplied company; S-41 scoped policy cleanup.
+Weaknesses/risks: F-03 tradeoff (identity tables outside RLS; consumers traced membership-scoped), F-02 unproven parity.
+Probe evidence: batch-3 pure probes only; no DB RLS probe was possible (F-10). RLS claims are source-traced, not DB-executed.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low DB-runtime. New 0; confirmed 2; revised 0; retracted 0.
+
+## Pass 14 - OIDC/session replay, expiry and revocation (fresh)
+
+Fresh code inspected: oidc.ex, oidc/attempts.ex, oidc/config.ex, oidc/http.ex, oidc_controller.ex, accounts.ex, operator_auth.ex, login_limiter.ex, migrations add_oidc_attempts.
+
+Critical paths traced: state/nonce/verifier are 32 random bytes; the durable attempt is consumed before any provider HTTP, so an old encrypted cookie cannot revive a consumed authorization (oidc.ex:38-48; attempts.ex:12-24); PKCE S256, RS256-only strict verification, iss/aud/azp/exp/iat/nbf/nonce/sub checks and algorithm-confusion guards (oidc.ex:79-130); token/JWKS transport is HTTPS-only with verify_peer, no redirects, bounded bodies (oidc/http.ex). Sessions are 8h, hashed at rest, rechecked for enabled on every use, revoked on sign-out and on OIDC completion for previous and current tokens (accounts.ex:28-69; oidc_controller.ex:31-39).
+
+Strengths: S-42 single-use durable OIDC state before network; S-43 revocable hashed sessions; S-44 strict token verification.
+Weaknesses/risks: F-04 (limiter), H-01 (OIDC HTTP does not IP-pin; no exploit evidenced).
+Probe evidence: https_ok true; http_bad false; query_bad false; userinfo_bad false; uuid_ok true.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low live-provider. New 0; confirmed 2; revised 0; retracted 0.
+
+## Pass 15 - Network SSRF/DNS/TLS/redirect adversary (fresh)
+
+Fresh code inspected: transport.ex, operation_policy.ex, source_config.ex, budgets.ex, azure_build.ex, metrics.ex, logs.ex, kubernetes.ex, workloads.ex, workload_collection.ex, oidc/http.ex, notifications.ex send_message.
+
+Critical paths traced: outbound reads pin one approved IP while preserving the original Host for TLS verification, forbid network inside a transaction, disable redirects/retries/decompression, cap response bytes and require an allowlisted path (transport.ex:3-97; operation_policy.ex). Source config must be https with no userinfo/query/fragment, endpoint in approved_origins, network_reviewed, approved_ips and bounded sizes (source_config.ex:20-48). Loki/Prometheus queries come from reviewed profiles; Kubernetes namespace is regex-validated and paths are built from it (source_config.kind_valid; workloads.ex:13-17). Notifications pin approved_ip and require the url to be in approved_urls (notifications.ex:236-256).
+
+Strengths: S-45 DNS-rebinding pin + original-host TLS + no redirects; S-46 reviewed allowlists and byte caps; S-47 no caller-controlled path/host in adapters.
+Weaknesses/risks: H-01 (OIDC HTTP not IP-pinned); F-13 config/delivery prerequisite gap.
+Probe evidence: policy_traversal false; policy_other false; prom_admin false; policy/prom valid true; retry caps 120/86400/junk 60.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low live-network. New 0; confirmed 2; revised 0; retracted 0.
+
+## Batch-3 completion status
+
+Passes completed: 15 of 35. No new confirmed findings; one hypothesis H-01 recorded as non-finding. Provisional scores 77, 78, 78, 78, 78. All history, corrections and safety boundaries preserved. Awaiting Main acceptance before passes 16-20.
+
+
+
+---
+
+# Batch-4: passes 16-20 of 35 (varied-angle reviews)
+
+Snapshot: HEAD 33dea0b74ccda530306495941b74f20997369bae; only findings1 changed; no app/config/test drift. Scores PROVISIONAL.
+
+## Reproducible isolated probe evidence (batch 4)
+
+Environment: ops_brain; mix at /opt/homebrew/bin/mix; Elixir 1.20.4 / OTP 27 (mise.toml); MIX_ENV dev; app NOT started; no DB; no provider.
+Command form: mix run --no-start -e (program). Exit code 0.
+
+Exact program:
+alias OpsBrain.{Redactor, Evidence, Workloads, Fingerprints, Lifecycle}
+r = []
+r = r ++ [{:redact_quoted, Redactor.clean("password=\"CANARY alpha beta\"")}]
+r = r ++ [{:redact_truncjson, Redactor.clean("{\"token\":\"CANARY tail")}]
+r = r ++ [{:redact_utf8, Redactor.clean(<<255>>)}]
+r = r ++ [{:redact_nil, Redactor.clean(nil)}]
+r = r ++ [{:redact_cap99, byte_size(Redactor.clean(String.duplicate("é", 5000), 99))}]
+r = r ++ [{:redact_oversize, Redactor.clean(String.duplicate("a", 1_048_577))}]
+r = r ++ [{:redact_idem, Redactor.clean(Redactor.clean("token=x")) == Redactor.clean("token=x")}]
+r = r ++ [{:timeline_malformed, Evidence.parse_timeline("not json")}]
+r = r ++ [{:timeline_too_many, Evidence.parse_timeline(Jason.encode!(%{"records" => Enum.map(1..501, fn i -> %{"id" => i} end)}))}]
+r = r ++ [{:workloads_bad, Workloads.list_page(Workloads.empty("pods", "ns"), %{"metadata" => %{}, "items" => "nope"}, 200)}]
+r = r ++ [{:fingerprint_version, Fingerprints.version()}]
+IO.inspect(r, limit: :infinity)
+
+Expected and actual output (identical): redact_quoted "password=[REDACTED]"; redact_truncjson "{\"token\":\"[REDACTED]\""; redact_utf8 "[invalid UTF-8]"; redact_nil "[invalid text]"; redact_cap99 98; redact_oversize "[input too large]"; redact_idem true; timeline_malformed {:error, :timeline_unavailable_or_truncated}; timeline_too_many {:error, :timeline_unavailable_or_truncated}; workloads_bad {:error, :malformed_list}; fingerprint_version 1. Proves behavior of these pure functions on these inputs only.
+
+| Pass | angle | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|-------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 16 | sensitive-data lifecycle / redaction | 73 | 84 | 82 | 67 | 82 | 75 | 76 | 81 | 78.00 | 78 |
+| 17 | malformed/oversized input robustness | 73 | 84 | 82 | 67 | 82 | 75 | 76 | 81 | 78.00 | 78 |
+| 18 | races and transactional invariants | 73 | 84 | 83 | 67 | 82 | 75 | 76 | 81 | 78.15 | 78 |
+| 19 | duplicate/out-of-order events, idempotency | 74 | 84 | 83 | 67 | 82 | 75 | 76 | 81 | 78.35 | 78 |
+| 20 | crash/restart/checkpoint recovery | 74 | 84 | 84 | 67 | 83 | 75 | 76 | 82 | 78.70 | 79 |
+
+Worked example Pass 20: (74*20 + 84*20 + 84*15 + 67*10 + 83*10 + 75*10 + 76*5 + 82*10)/100 = 7870/100 = 78.70 -> 79.
+
+## Pass 16 - Sensitive-data lifecycle and redaction (fresh)
+
+Fresh code inspected: redactor.ex, redactor_test.exs, redaction_flow_test.exs, evidence.ex, logs.ex, metrics.ex, notifications.ex send_message, config/config.exs filter_parameters, config/runtime.exs filter_parameters, store.ex, issues.ex evidence/revisions.
+
+Critical paths traced: Redactor cleans before persistence and bounds output; it consumes whole quoted values, redacts unterminated quotes to end of input, handles invalid UTF-8 and oversized input, and is idempotent (redactor.ex:16-70). Evidence.save bounds payloads to 30KB and substitutes a truncation marker (evidence.ex:49-88). Expired evidence is returned as a status object rather than deleted silently (issues.ex evidence/revisions). Notification payload text is redacted and capped (notifications.ex:263). Logger filter parameters include token/password/secret/code/state/nonce (config/config.exs; runtime.exs).
+
+Strengths: S-48 redaction before persistence with quote/UTF-8/bounds/idempotency coverage; S-49 bounded evidence with explicit truncation marker; S-50 redacted bounded delivery payloads; S-51 log-parameter filtering.
+Weaknesses/risks: deliberate over-redaction of text after an unterminated quote is an intentional safety tradeoff (redactor_test asserts the trailing unrelated text is removed), not a defect. F-13 config gap noted.
+Probe evidence (batch 4): redact_quoted, redact_truncjson, redact_utf8, redact_nil, redact_cap99=98, redact_oversize, redact_idem true.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static + isolated probe; Low runtime. New 0; confirmed 2; revised 0; retracted 0.
+
+## Pass 17 - Malformed and oversized input robustness (fresh)
+
+Fresh code inspected: redactor.ex, evidence.ex parse_timeline, azure_build.ex decode/normalize, workloads.ex list_page/sanitize, telemetry_collection.ex persist, transport.ex body cap, oidc/http.ex body cap, logs.ex decode_samples, metrics.ex decode.
+
+Critical paths traced: timeline rejects non-JSON and >500 records (evidence.ex:5-46); Azure decode bounds pages and rejects oversize tokens/malformed rows (azure_build.ex); Workloads bounds resourceVersion/continue tokens and returns {:error, :malformed_list} on bad shapes (workloads.ex:34-44,393-405); Transport and OIDC HTTP halt and flag oversized bodies (transport.ex into; oidc/http.ex); Logs caps 200 samples and marks capped_or_saturated (logs.ex:75-98); Metrics/Telemetry bound stored JSON to 60KB with a partial marker (telemetry_collection.ex persist).
+Strengths: S-52 bounded parsers reject rather than partially accept; S-53 oversize bodies are halted with explicit markers; S-54 storage byte budgets.
+Weaknesses/risks: none new; F-14 (latent a11y) unrelated.
+Probe evidence (batch 4): timeline_malformed and timeline_too_many both {:error, :timeline_unavailable_or_truncated}; workloads_bad {:error, :malformed_list}.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static + probe; Low runtime. New 0; confirmed 0; revised 0; retracted 0.
+
+## Pass 18 - Races and transactional invariants (fresh)
+
+Fresh code inspected: budgets.ex, collection.ex claim/fenced!/persist, telemetry_collection.ex claim/persist_window/finish_state, tenancy.ex with_scope, issue_review.ex mutate, notifications.ex claim/deliver, issues.ex record locks, store.ex.
+
+Critical paths traced: budget reservation uses FOR UPDATE plus in_flight_until and reservation token; HTTP never runs inside the transaction (budgets.ex:5-57). Collection and telemetry claim bump fence/lease under FOR UPDATE and re-verify fence and lease before persist, rolling back :stale_lease (collection.ex fenced!; telemetry_collection.ex persist_window). with_scope rejects nested scopes and re-authorizes inside the transaction (tenancy.ex:38-56). Review actions lock the group FOR UPDATE, recheck revision, re-resolve the actor, and write the audit event in the same transaction (issue_review.ex mutate/actor!). Notification claim locks the issue group and outbox row and conditions on status (notifications.ex claim). Issue recording serializes via advisory locks (issues.ex record).
+Strengths: S-55 explicit fencing + reservation tokens; S-56 single-writer critical sections via FOR UPDATE/advisory locks; S-57 audit and state change are atomic.
+Weaknesses/risks: F-08 (unmeasured contention at scale); F-02 unproven parity.
+Probe evidence: none for DB transactions (F-10 blocker); source-traced only.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low DB-concurrency. New 0; confirmed 2; revised 0; retracted 0.
+
+## Pass 19 - Duplicate/out-of-order events and idempotency (fresh)
+
+Fresh code inspected: issues.ex record/improve_occurrence, evidence.ex save/failure, telemetry_collection.ex persist, collection.ex persist, notifications.ex prepare/claim, lifecycle.ex event_time, fingerprints.ex, migrations unique indexes.
+
+Critical paths traced: occurrence identity is (source_id, occurrence_key) and identifiers are advisory-locked even for absent rows (issues.ex record). Repeated identical evidence yields no new revision; a linked revision check prevents duplicate counts; older (stale) evidence is recorded as stale_ignored without replacing current (issues.ex improve_occurrence/stale_evidence?). Event time rejects events more than 300s in the future; severity is monotonic within an episode (lifecycle.ex:44-55). Evidence upsert is keyed by (company,source,evidence_key) with digest in the key (evidence.ex:49-88); observation windows upsert by (company,source,profile,window_start,window_end) and only bump revision on data change (telemetry_collection.ex persist); notifications have a unique (company,group,revision,destination) delivery identity (migration:18-20).
+Strengths: S-58 idempotent occurrence/revision model; S-59 out-of-order/stale and future-skew handling; S-60 dedupe unique indexes.
+Weaknesses/risks: F-13 (delivery prerequisite gap); intentional: identical repeat does not create revision.
+Probe evidence (batch 3): tx transitions; no DB idempotency probe (F-10).
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low DB. New 0; confirmed 2; revised 0; retracted 0.
+
+## Pass 20 - Crash/restart/checkpoint recovery (fresh)
+
+Fresh code inspected: collection.ex, telemetry_collection.ex, recovery.ex, scheduler.ex, all workers, directory_maintenance_worker.ex, application.ex, config Oban plugins, scripts/hard_crash_claim.exs, scripts/hard_crash_verify.exs, local-recovery-check.sh, orphan_recovery_test.exs, readiness_test.exs.
+
+Critical paths traced: durable checkpoints (collection_states window/cursor/fence, kubernetes_cursors, observation revisions) survive restart; Oban LifeLine rescues orphans after 10m with Database peer; in-flight deliveries become :ambiguous on re-claim and are never auto-resent (notifications.ex claim; orphan_recovery_test cases). Workers are bounded (timeouts) below rescue age (orphan_recovery_test line 112+). Directory maintenance expires tokens/attempts/terminal jobs in bounded batches. The hard-crash harness proves busy-before-expiry, takeover, stale rejection, fresh commit and duplicate rejection (hard_crash_verify.exs CRASH_VERIFY_OK).
+Strengths: S-61 fenced takeover after crash with stale-lease rejection; S-62 ambiguity preserved across rescue; S-63 bounded cleanup and restart-safe checkpoints.
+Weaknesses/risks: F-08 (restart load), F-10 (crash harness not executed here).
+Probe evidence: none executed (DB harness); scripts source-traced only.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low crash-runtime. New 0; confirmed 2; revised 0; retracted 0.
+
+## Batch-4 completion status
+
+Passes completed: 20 of 35. No new confirmed findings; no hypotheses added. Provisional scores 78, 78, 78, 78, 79. All history preserved and mechanically checked. Awaiting Main acceptance before passes 21-25.
+
+
+
+---
+
+# Batch-4 revision addendum (Main report-d96a7d31-8f00-4d57-a73b-dd1c091a7216)
+
+Preserves all prior text. Reporting-accuracy corrections only; no code, no DB checks.
+
+## Correction P20: hard-crash wording
+
+The hard-crash harness was NOT executed. scripts/hard_crash_verify.exs contains ExUnit assertions intended to verify busy-before-expiry, takeover, stale rejection, fresh commit and duplicate rejection; it printed its success message only when that harness is separately run. Corrected wording: the scripts contain assertions intended to verify recovery; the recovery behaviors are STATIC DESIGN EVIDENCE from source and scripts, not observed restart behavior. Durability, rescue and takeover conclusions in Pass 20 are therefore static, not runtime-verified.
+
+## F-08 scope kept narrow
+
+The Pass 18 weakness line that implied F-08 (OperationsLive polling) relates to generic transaction contention, and the Pass 20 weakness line that implied it relates to restart load, are withdrawn as unsupported cross-references. F-08 remains ONLY the unmeasured cost of a full OperationsLive load every 10s per connected socket (operations_live.ex:6,28-31,211-328). No concrete causal path from that polling to transaction contention or restart load was traced, and none is asserted. If such a path is ever proposed it must be a clearly labelled hypothesis with evidence.
+
+## Redactor idempotency qualified
+
+S-48 stated idempotency coverage generally. The batch-4 probe verified redact_idem = true for the single input "token=x" only; the test suite asserts idempotency across more cases but was not executed (F-10). Corrected statement: idempotency is verified for the tested probe case plus source reasoning (regex replacement converges, redactor.ex:16-70), not proven universally.
+
+## "confirmed N" counts made explicit in batch 4
+
+Counts below distinguish (a) newly confirmed defects, (b) rechecked existing findings/risks, (c) tradeoffs/limitations/blockers. None of batch 4 produced a new confirmed defect.
+- Pass 16: new confirmed 0; rechecked F-13 (Low validation gap). Prior "confirmed 2" corrected to 1 rechecked risk, 0 defects.
+- Pass 17: new confirmed 0; rechecked none. Prior count 0 was correct.
+- Pass 18: new confirmed 0; rechecked F-08 (risk, unmeasured) and F-02 (unproven maintainability). Neither is a confirmed defect. Prior "confirmed 2" corrected to 2 rechecked risks (F-08, F-02), 0 defects.
+- Pass 19: new confirmed 0; rechecked F-13. Prior "confirmed 2" corrected to 1 rechecked risk (F-13), 0 defects.
+- Pass 20: new confirmed 0; rechecked F-10 (environmental blocker: no disposable DB) and noted F-08 is not applicable to crash checks. Prior "confirmed 2" corrected to 1 rechecked blocker (F-10) + 1 non-applicable risk (F-08), 0 defects.
+
+## Current status after corrections
+
+Passes completed: 20 of 35. Provisional scores unchanged: batch 4 = 78, 78, 78, 78, 79. Register unchanged: F-01 High; F-04/F-08 Medium; F-02/F-05/F-09/F-13/F-14 Low risks; F-03 tradeoff; F-07/F-10/F-11 limitations; H-01 non-finding hypothesis; F-06/F-12 cleared. Awaiting Main acceptance before passes 21-25.
+
+
+
+---
+
+# Batch-5: passes 21-25 of 35 (varied-angle reviews)
+
+Snapshot: HEAD 33dea0b74ccda530306495941b74f20997369bae; only findings1 changed; no app/config/test drift. Scores PROVISIONAL.
+
+## Reproducible isolated probe evidence (batch 5)
+
+Environment: ops_brain; mix at /opt/homebrew/bin/mix; Elixir 1.20.4 / OTP 27 (mise.toml); MIX_ENV dev; app NOT started; no DB; no provider.
+Command form: mix run --no-start -e (program). Exit code 0.
+Program A (capacity negative + outcome + fingerprint):
+alias OpsBrain.{Capacity, Outcome, Correlation, Fingerprints}
+now = 1_000_000
+policy = %{unit: "bytes", limits_verified: true, freshness_seconds: 600, max_gap_seconds: 300, min_history_seconds: 1, effective_threshold: 1000, warning_horizon_seconds: 100, min_growth_bytes_per_second: 1}
+flat = Enum.map(0..9, fn i -> %{time: i * 60, value: 500, series: "s", unit: "bytes"} end)
+grow = Enum.map(0..9, fn i -> %{time: i * 60, value: 500 + i * 50, series: "s", unit: "bytes"} end)
+r = []
+r = r ++ [{:cap_bad_policy, Capacity.evaluate([], %{}, now)}]
+r = r ++ [{:cap_flat, Capacity.evaluate(flat, policy, now)}]
+r = r ++ [{:cap_growth, Capacity.evaluate(grow, policy, now)}]
+r = r ++ [{:outcome_stale, Outcome.normalize({:ok, {:error, :stale_lease}})}]
+r = r ++ [{:outcome_stale_oban, Outcome.to_oban(Outcome.normalize({:ok, {:error, :stale_lease}}))}]
+r = r ++ [{:outcome_sourcefail, Outcome.to_oban(Outcome.normalize({:source_failure, :access_denied}))}]
+r = r ++ [{:outcome_retryable, Outcome.to_oban(Outcome.normalize({:error, :boom}))}]
+r = r ++ [{:fp401, Fingerprints.identify("co", "s", "tool", "HTTP 401 unauthorized")[:classification]}]
+IO.inspect(r, limit: :infinity)
+Program A output: cap_bad_policy unknown (missing/invalid policy); cap_flat and cap_growth unknown (missing/invalid samples - deliberately malformed shape); outcome_stale {:deferred, :stale_lease, 5}; outcome_stale_oban {:snooze, 5}; outcome_sourcefail :ok; outcome_retryable {:error, :boom}; fp401 "authentication_rejection".
+
+Program B (capacity positive/negative with valid shape):
+alias OpsBrain.Capacity
+now = 640
+policy = %{unit: "bytes", limits_verified: true, freshness_seconds: 600, max_gap_seconds: 120, min_history_seconds: 1, effective_threshold: 1000, warning_horizon_seconds: 100, min_growth_bytes_per_second: 0.5}
+mk = fn val -> Enum.map(0..9, fn i -> %{time: i * 60, received_at: i * 60, value: val.(i), series: "s", segment: "g", unit: "bytes"} end) end
+flat = mk.(fn _ -> 500 end)
+grow = mk.(fn i -> 500 + i * 50 end)
+IO.inspect([{:cap_flat, Capacity.evaluate(flat, policy, now)}, {:cap_growth, Capacity.evaluate(grow, policy, now)}], limit: :infinity)
+Program B output: cap_flat condition "unknown", reason "no meaningful sustained positive growth"; cap_growth condition "warning", seconds_to_threshold 60.0, growth_bytes_per_second 0.8333..., current_usage 950, effective_threshold 1000.
+Correlation (program A companion): a candidate with relation "investigation candidate, not established cause", counterevidence [], alternatives_preserved true. Proves behavior of these pure functions on these inputs only.
+
+| Pass | angle | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|-------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 21 | provider outages/throttling/partial data | 74 | 84 | 84 | 67 | 83 | 76 | 77 | 82 | 78.85 | 79 |
+| 22 | fairness/budgets/backpressure | 74 | 84 | 84 | 67 | 83 | 76 | 77 | 82 | 78.85 | 79 |
+| 23 | evidence provenance/detector accuracy | 75 | 84 | 84 | 67 | 83 | 76 | 77 | 82 | 79.05 | 79 |
+| 24 | capacity uncertainty/misleading health | 75 | 84 | 84 | 68 | 83 | 76 | 77 | 82 | 79.15 | 79 |
+| 25 | stale human decisions/audit trail | 75 | 84 | 85 | 68 | 83 | 76 | 77 | 82 | 79.30 | 79 |
+
+Worked example Pass 21: (74*20 + 84*20 + 84*15 + 67*10 + 83*10 + 76*10 + 77*5 + 82*10)/100 = 7885/100 = 78.85 -> 79.
+
+## Pass 21 - Provider outages, throttling and partial data (fresh)
+
+Fresh code inspected: transport.ex, budgets.ex, collection.ex, telemetry_collection.ex, azure_build.ex, outcome.ex, evidence.ex, notifications.ex, recovery.ex, directory_maintenance_worker.ex.
+Critical paths traced: transport failures return {:error, :transport_unavailable}; budgets.finish schedules a 30s backoff and increments errors on failure; Retry-After is honored and capped (transport.retry_seconds). Collection/telemetry classify errors as partial coverage with explicit error strings and requeue rather than claiming completeness (collection.fail; telemetry_collection.finish_state coverage partial/catching_up). Outcome.normalize maps a committed source failure to {:source_failure, reason} -> to_oban :ok (re-attempted by cadence, not an infinite job error), while stale_lease/busy/budget_exhausted become deferred snoozes and only genuine internal errors become retryable {:error, _} (outcome.ex:1-60). Provider 401/403/429/invalid are handled without losing partial work.
+Strengths: S-64 explicit outcome contract distinguishes source failure vs retryable; S-65 backoff/Retry-After with caps; S-66 honest partial/catching_up coverage.
+Weaknesses/risks: F-04, F-08, F-13 (Low validation gap, still confirmed source-confirmed), F-10/F-11 limitations.
+Probe evidence: outcome_stale {:deferred, :stale_lease, 5}; outcome_stale_oban {:snooze, 5}; outcome_sourcefail :ok; outcome_retryable {:error, :boom}.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static + isolated probe; Low live-provider. New confirmed defects 0; rechecked findings/risks F-13 (confirmed Low gap, not retracted), F-04/F-08 (risks), F-10/F-11 (limitations).
+
+## Pass 22 - Fairness, budgets and backpressure (fresh)
+
+Fresh code inspected: budgets.ex, scheduler.ex, collection.ex, telemetry_collection.ex, evidence_worker.ex, collection_worker.ex, maintenance_worker.ex, directory_maintenance_worker.ex, config.exs Oban queues.
+Critical paths traced: scheduler rotates a bounded source inventory (20 per tick) instead of an unbounded backlog; Kubernetes watchers are one supervised process per source via a registry; source_budgets enforce a per-minute request ceiling, single in-flight reservation and FOR UPDATE serialization; enrichment queue is capped at 100 pending per source with Evidence.unavailable recorded when exceeded; maintenance/directory workers use batch limits and SKIP LOCKED; Oban queues are fixed-size (collect 4, enrich 2, delivery 1, maintenance 1).
+Strengths: S-67 bounded scheduling and per-source budgets; S-68 enrichment backpressure with honest unavailable evidence; S-69 bounded maintenance batches.
+Weaknesses/risks: F-08 only (OperationsLive 10s polling; no proven link to job queue fairness), F-04.
+Probe evidence: none for DB budgets (F-10); source-traced.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low DB. New confirmed defects 0; rechecked F-08 (risk), F-04 (risk).
+
+## Pass 23 - Evidence provenance and detector accuracy (fresh)
+
+Fresh code inspected: correlation.ex, fingerprints.ex, capacity.ex, evaluations.ex, evidence.ex, replay_detectors.ex, detectors_test.exs, issues.ex.
+Critical paths traced: fingerprints are exact normalized templates with company/scope/tool/classification/version and an explicit "not confirmed common cause" reason (fingerprints.ex:49-59); correlation returns candidates with a relation string, preserved alternatives, counterevidence for symptom-preceding changes, and a missing-mechanism notice (correlation.ex); evidence lineage is append-only occurrence_evidence with revision/fingerprint/parser_version and current-pointer comparison (issues.revisions); replay runs version-gated detectors over retained inputs and marks expired/malformed/missing as unavailable rather than empty success (replay_detectors.ex:14-38).
+Strengths: S-70 explicit non-causal language and counterevidence; S-71 versioned detector identities and append-only provenance; S-72 no inferred success for missing inputs.
+Weaknesses/risks: F-13; intentional heuristic limitations of correlation (temporal+identity, not mechanism).
+Probe evidence: fp401 "authentication_rejection"; correlation candidate with relation "investigation candidate, not established cause" and alternatives_preserved true.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static + probe; Low end-to-end accuracy. New confirmed defects 0; rechecked F-13.
+
+## Pass 24 - Capacity uncertainty and misleading health (fresh)
+
+Fresh code inspected: capacity.ex, evaluations.ex, telemetry_collection.ex, lifecycle.ex, recovery.ex, ui.ex summaries, capacity_acceptance_test.exs, capacity_recovery_test.exs.
+Critical paths traced: capacity requires a verified bytes policy, nonnegative finite samples, stable series/segment, >=5 samples, freshness, regular gaps, nondecreasing usage and sustained growth in >=75% of intervals AND elapsed time; otherwise it returns condition "unknown" with a reason. A reached threshold is "critical" with seconds_to_threshold 0. A forecast is labelled a conditional estimate; recovery requires a fresh normal evaluation under the same profile/policy and newer event time (lifecycle.capacity_recoverable?), never quiet time. UI summaries state stored facts and "not current incidents"/"not normal".
+Strengths: S-73 conservative, uncertainty-first forecast; S-74 recovery only from comparable fresh normal evidence; S-75 truthful UI summaries.
+Weaknesses/risks: capacity is a heuristic, not calibrated (intentional, documented); F-08.
+Probe evidence: cap_bad_policy unknown; malformed samples unknown; cap_flat unknown ("no meaningful sustained positive growth"); cap_growth "warning" with conditional estimate (seconds_to_threshold 60.0, growth 0.8333/s).
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static + probe; Low live accuracy. New confirmed defects 0; rechecked F-08 (risk) and capacity heuristic (intentional).
+
+## Pass 25 - Stale human decisions and audit trail (fresh)
+
+Fresh code inspected: issue_review.ex, lifecycle.ex, issues.ex list/evidence/revisions, operations_live.ex events, audit migration, runtime_grants.sql, orphan_recovery_test.exs.
+Critical paths traced: local actions require expected_revision; the group is locked FOR UPDATE; the actor is re-resolved after the lock to catch revocation; a stale revision rolls back :stale_revision; the audit insert is in the same transaction and its failure rolls back the state change (issue_review.ex mutate/actor!). Transitions are a strict whitelist (lifecycle.ex:64-77). The audit table enforces allowed actions, before>0/after=before+1 and bounded JSON keys, with RLS and runtime SELECT/INSERT only (migration 20260926061350:26-53; runtime_grants.sql:16-18). The UI surfaces stale-revision conflicts and keeps evidence snapshots fresh (operations_live.ex finish_action; load resets selected evidence on refresh).
+Strengths: S-76 revision-fenced review with atomic audit; S-77 immutable append-only audit and strict transitions; S-78 clear conflict handling.
+Weaknesses/risks: F-09 (large LiveView) is the only related maintainability risk; F-08 unrelated and not cited here.
+Probe evidence: tx_new_close {:ok, "closed_by_reviewer"}; tx_closed_quiet {:error, :invalid_transition} (batch 3, reused and labelled).
+Reused evidence: batch-3 lifecycle probe (labelled as reused; not rerun) and batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low DB-concurrency. New confirmed defects 0; rechecked F-09 and F-13 (relevant to review visibility).
+
+## Batch-5 completion status
+
+Passes completed: 25 of 35. No new confirmed defects and no new hypotheses; F-13 remains a source-confirmed Low validation gap (not retracted). Provisional scores 79, 79, 79, 79, 79. History preserved and mechanically checked. Awaiting Main acceptance before passes 26-30.
+
+
+
+---
+
+# Batch-5 revision addendum (Main report-63e80e8d-fe82-4139-b435-7f1bb94856b1)
+
+Preserves all prior text. Closes one evidence-recording gap only; no code, no DB, no network.
+
+## Correlation companion probe recorded (batch-5 evidence gap closed)
+
+The batch-5 prose referenced a Correlation candidate but Programs A/B did not contain the Correlation call. This addendum records the exact separately executed companion probe. Environment and toolchain are identical to the batch-5 probes (ops_brain; mix at /opt/homebrew/bin/mix; Elixir 1.20.4 / OTP 27 per mise.toml; MIX_ENV dev; app NOT started; no DB; no provider). Exit code 0. This probe was executed once in batch 5 (a full-output capture), not rerun for the correction.
+
+Exact companion program:
+alias OpsBrain.Correlation
+fact = %{company_id: "co", environment_id: "e", target_id: "t", evidence_id: "ev1", occurred_at: 100, received_at: 100}
+change = %{company_id: "co", environment_id: "e", target_id: "t", evidence_id: "ev2", occurred_at: 50, received_at: 50}
+IO.inspect(Correlation.evaluate(fact, [change], [], 100), limit: :infinity)
+
+Inputs: one symptom fact (ev1, occurred=received=100) and one change fact (ev2, occurred=received=50) with matching company/environment/target, empty topology, now=100. Expectation: a candidate (not a cause claim) with alternatives preserved; counterevidence empty because the change predates the symptom.
+Actual output:
+%{
+  version: 1,
+  missing: "Comparable healthy measurements and mechanism evidence required",
+  candidates: [
+    %{
+      relation: "investigation candidate, not established cause",
+      change_evidence_id: "ev2",
+      symptom_evidence_id: "ev1",
+      counterevidence: [],
+      elapsed_seconds: 50
+    }
+  ],
+  alternatives_preserved: true
+}
+
+Scope: proves Correlation.evaluate/4 behavior on this single input only; it is not end-to-end detector accuracy evidence. No invocation was fabricated; the previously recorded output prose is now backed by the exact program above.
+
+## Current status after this addendum
+
+Passes completed: 25 of 35. Provisional scores unchanged: batch 5 = 79, 79, 79, 79, 79. Register unchanged, including F-13 as a source-confirmed Low validation gap. Awaiting Main acceptance before passes 26-30.
+
+
+
+---
+
+# Batch-6: passes 26-30 of 35 (varied-angle reviews)
+
+Snapshot: HEAD 33dea0b74ccda530306495941b74f20997369bae; only findings1 changed; no app/config/test drift. Scores PROVISIONAL.
+
+| Pass | angle | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|-------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 26 | delivery authorization / ambiguous retries | 75 | 85 | 84 | 68 | 83 | 76 | 77 | 82 | 79.35 | 79 |
+| 27 | retention expiry / replay determinism | 75 | 84 | 85 | 68 | 84 | 77 | 77 | 82 | 79.50 | 80 |
+| 28 | keyboard/screen-reader/navigation/responsive UX | 75 | 84 | 84 | 72 | 83 | 77 | 77 | 82 | 79.65 | 80 |
+| 29 | release/migrations/grants/backup recovery | 75 | 85 | 85 | 68 | 83 | 76 | 77 | 84 | 79.70 | 80 |
+| 30 | test blind spots / specification drift | 75 | 84 | 84 | 68 | 83 | 74 | 77 | 82 | 78.95 | 79 |
+
+Worked example Pass 26: (75*20 + 85*20 + 84*15 + 68*10 + 83*10 + 76*10 + 77*5 + 82*10)/100 = 7935/100 = 79.35 -> 79.
+
+No new behavioral probe was run in batch 6; the batch-5 probes (Programs A/B and the Correlation companion) are reused and labelled as reused, not rerun. No DB, browser, screen reader or live-provider check was performed.
+
+## Pass 26 - Delivery authorization and ambiguous retries (fresh)
+
+Fresh code inspected: notifications.ex, notification_worker.ex, notification_revision_test.exs, notification_outcomes_test.exs, orphan_recovery_test.exs, add_notification_outbox migration, configuration.ex, transport.retry_seconds.
+Critical paths traced: prepare creates one pending row per (company,group,revision,destination) with a unique delivery_identity index (migration:18-20), rechecks approval per destination and computes digest/cooldown/quiet windows. deliver requires delivery_enabled, claims with group lock and outbox FOR UPDATE, rechecks approval, treats a prior delivering row as ambiguous, coalesces only genuinely newer outbox revisions, enforces retry cap 3, and sends with pinned approved_ip, approved_urls membership, idempotency-key and bounded redacted text (notifications.ex:83-290). Local assignment/review preserve the pending identity and send current state; foreign-company updates cannot alter a pending notice (notification_revision_test names lines 61,100,139,185).
+Strengths: S-79 stable delivery identity + approval recheck at claim and send; S-80 ambiguous/retry-exhausted never auto-replayed; S-81 pinned IP/approved URL/idempotency-key and credential isolation.
+Weaknesses/risks: F-13 (Low validation gap, source-confirmed: config load does not require approved_urls/approved_ip/https shape that send_message requires; non-delivery is persisted as rejected and visible in the Evidence workspace, not silent). F-04 unrelated.
+Probe evidence: reused batch-1 outcome probes labelled; no delivery network call made.
+Reused evidence: batch-1 compile/routes; batch-5 Outcome probe (labelled reused).
+Confidence: Medium-high static; Low live-delivery. New confirmed defects 0; rechecked F-13 (confirmed Low gap, not retracted), F-04 (risk).
+
+## Pass 27 - Retention expiry and replay determinism (fresh)
+
+Fresh code inspected: retention.ex, replay.ex, replay_detectors.ex, replay_retention_test.exs, retention_policy_test.exs, evidence.ex, telemetry_collection.ex persist, runtime grants.
+Critical paths traced: retention persists the reviewed policy on the durable source, resolves company scope, refuses to guess when the policy is unknown, defers under live writers, uses statement/lock timeouts, tombstones evidence rather than deleting it, and protects open issues/correlations/revisions/windows (retention.ex sweep/run_sweep/unreferenced_evidence). Replay uses separate event/knowledge cutoffs, binding-bound cursors, absent==invisible, and version-gated detectors that mark expired/malformed/missing as unavailable rather than empty success (replay.ex; replay_detectors.ex:14-38). Tests assert retained-policy replay, future-sample exclusion, deterministic pagination with no mutations, and protection of expiry markers (replay_retention_test lines 24,73,131,272,320,363).
+Strengths: S-82 policy persists across disabled/removed config; S-83 deterministic, read-only, cutoff-bound replay; S-84 tombstone identity preserved.
+Weaknesses/risks: F-02 unproven grant parity; replay determinism is source/test-name traced (DB suite not run, F-10).
+Probe evidence: none new; no DB.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low DB. New confirmed defects 0; rechecked F-02 (unproven risk), F-10 (blocker).
+
+## Pass 28 - Keyboard, screen-reader, navigation and responsive UX (fresh)
+
+Fresh code inspected: layouts.ex, ui.ex, core_components.ex, operations_live.ex evidence focus, session_html.ex, error templates, priv/static/assets/css/app.css, console_ui_test.exs, workspace_home_test.exs, operations_live_test.exs.
+Critical paths traced: navigation has aria-label and aria-current; the connection banner uses role=status; the demo banner uses role=note; main content has tabindex=-1; the evidence heading receives JS.focus with tabindex=-1 (operations_live.ex:781); sign-in is a labelled form with a role=alert error (session_html.ex). CSS provides focus-visible styles, forced-colors adaptations, print rules, prefers-reduced-motion reduce and no-preference branches, and responsive breakpoints at 1000px, 680px and 480px (app.css:2280,2375,2377,2410,2412; 12 @media blocks). Tests assert accessible sign-in with no echoed token and company-explicit navigation (console_ui_test lines 166,191).
+Strengths: S-85 semantic navigation/live-region labels + focus management; S-86 responsive and reduced-motion CSS; S-87 a11y-oriented tests exist (not executed here, F-10).
+Weaknesses/risks: F-14 remains an OPTIONAL semantic-explicitness note (shared table component th lacks scope; no production consumer); no screen-reader/kontrast runtime validation was performed, so accessibility is unverified at runtime.
+Probe evidence: none (no browser/screen reader); static only.
+Reused evidence: batch-1 compile/routes (labelled; snapshot unchanged; not rerun).
+Confidence: Medium static; Low runtime accessibility. New confirmed defects 0; rechecked F-14 (optional note).
+
+## Pass 29 - Release, migrations, grants and backup recovery (fresh)
+
+Fresh code inspected: rel/overlays/ops/migrate.exs, preflight.exs, bin/release-command, bin/healthcheck, rel/roles.sql, both runtime grant scripts, Dockerfile, docs/DEPLOYMENT.md, rel/tests, ci.yml.
+Critical paths traced: migrate.exs requires OPS_BRAIN_MIGRATION_APPROVED and the dedicated non-superuser/non-BYPASSRLS ops_brain_migrator identity, and never starts the app (migrate.exs:1-26). preflight verifies role/DDL/ownership/migration-version parity before start (preflight.exs:10-45; release-command:28-33). roles.sql creates NOLOGIN/NOINHERIT/NOBYPASSRLS migrator+runtime and a separate BYPASSRLS backup role, revokes PUBLIC and EXECUTE defaults, keeps DB ownership with the DBA (roles.sql:19-41). runtime-grants is revoke-first with an approved-database guard. Dockerfile runs non-root with no EXPOSE and a liveness HEALTHCHECK. DEPLOYMENT.md documents a gated, isolated restore drill.
+Strengths: S-88 approval-gated migration/start preflight; S-89 least-privilege roles and revoke-first grants; S-90 documented, marker-guarded backup/restore procedure.
+Weaknesses/risks: F-01 (High: rel/tests release-contract suites are NOT invoked by ci.yml:70-78 - verification blind spot, not a runtime defect); F-02 unproven grant parity; F-07 ongoing (not startup) readiness limitation.
+Probe evidence: none new; release tests not executed here and not wired into CI.
+Reused evidence: batch-1 compile/routes/validate_config (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low deployed-runtime. New confirmed defects 0; rechecked F-01 (High, still open), F-02, F-07.
+
+## Pass 30 - Test blind spots and specification drift (fresh)
+
+Fresh code inspected: ops_brain/test tree, test_helper.exs, support fixtures, mix.exs aliases, ci.yml, docs/ACCEPTANCE_HARNESS.md, README.md, docs/*, ops_command_center_v2 status docs.
+Critical paths traced: the suite contains 260 test definitions (source count) covering authz/tenancy/redaction/replay/retention/notifications/capacity/issue-review; test_helper gates all tests on DatabaseSafety.verify! and Fixtures.verify_disposable!, so they cannot run without a verified disposable DB (F-10). mix ci alias is format --check-formatted, compile --warnings-as-errors, test (mix.exs:63). ci.yml runs those steps plus routes/config validation but does NOT run rel/tests (F-01). docs/ACCEPTANCE_HARNESS.md's "Executed evidence (2026-09-20)" states "mix ci: 208 passed" with a seed; the current tree has 260 test definitions including newer untracked tests (issue_review, notification_revision, redaction_flow, capacity_live), so that executed-evidence count is stale relative to the dirty working tree.
+New finding F-15 (Low, documentation/verification drift): ACCEPTANCE_HARNESS.md executed-evidence count (208) predates the current 260 test definitions and cannot be independently confirmed here (DB blocker). Not a code defect. Fix: re-run and update the ledger, or label the line as of the recorded snapshot. Regression: a docs check asserting the recorded count matches a fresh run would be excessive; a manual update suffices. Effort S. Confidence High (source count) / cannot verify execution.
+Strengths: S-91 broad invariant-oriented test names across security, lineage, retention and UX; S-92 explicit disposable-DB safety gate.
+Weaknesses/risks: F-01 (release tests not in CI), F-15 (stale executed-evidence count), F-10/F-11 (no execution/live validation here). 260 definitions are NOT 260 executed tests.
+Probe evidence: none new.
+Reused evidence: batch-1 compile/routes/format (labelled; snapshot unchanged; not rerun).
+Confidence: Medium-high static; Low execution. New confirmed defect 1 (F-15 Low docs drift); rechecked F-01/F-10/F-11.
+
+## Register after batch 6
+
+- F-15 added: Low documentation/verification drift (ACCEPTANCE_HARNESS executed-evidence count 208 vs 260 current test definitions).
+- F-13 remains a source-confirmed Low validation gap. F-01 remains High. No other changes.
+
+## Batch-6 completion status
+
+Passes completed: 30 of 35. Provisional scores 79, 80, 80, 80, 79. History preserved and mechanically checked. Awaiting Main acceptance before final cross-checks 31-35.
+
+
+
+---
+
+# Batch-6 revision addendum (Main report-4e318fc5-cae1-4afa-9002-c2a636f0a9e0)
+
+Preserves all prior text. F-15 retraction and one score correction; no code, DB or network checks.
+
+## F-15 RETRACTED (was Low documentation/verification drift)
+
+Main's reading is confirmed from source: ops_brain/docs/ACCEPTANCE_HARNESS.md:36-53 labels the result "Executed evidence (2026-09-20)", gives the seed 564594, a log path, release/crash manifests, explicit artifact provenance, and explicit limitations ("no assertion of deterministic byte-for-byte rebuilding"). The 208 figure is therefore a dated historical run, not a claim about the current working tree. A larger current count of 260 source test definitions does not falsify it, and definition counts are not executed-test counts. There is no statement in the doc that 208 describes the current tree. Corrected disposition: F-15 is NOT a defect; retracted. The only remaining item is the current-execution evidence gap already recorded as F-10 (no verified disposable DB here), plus an OPTIONAL, non-mandatory traceability improvement (copying dated /tmp artifacts into a durable reviewed evidence store) that is already acknowledged in the doc.
+
+## Correction: Pass 30 test score tied to F-15 retraction
+
+Pass 30 test-quality was lowered to 74 partly because of the F-15 classification. With F-15 retracted, Pass 30 test score is corrected 74 -> 75. Recomputed Pass 30 overall: (75*20 + 84*20 + 84*15 + 68*10 + 83*10 + 75*10 + 77*5 + 82*10)/100 = 7905/100 = 79.05 -> 79. The Pass 30 overall was already 79, so the batch and cumulative overalls are unchanged. Batch-6 provisional scores remain 79, 80, 80, 80, 79.
+
+## Counts after correction
+
+Batch 6 confirmed defects: 0 (F-15 retracted). Rechecked: F-01 (High, open), F-02 (unproven risk), F-04 (risk), F-13 (confirmed Low validation gap, not retracted), F-14 (optional note), F-10/F-11 (limitations). Register: F-01 High; F-04/F-08 Medium; F-02/F-05/F-09/F-13/F-14 Low risks; F-03 tradeoff; F-07/F-10/F-11 limitations; H-01 non-finding hypothesis; F-06/F-12/F-15 cleared/retracted.
+
+## Current status
+
+Passes completed: 30 of 35. Awaiting Main acceptance before final cross-checks 31-35. Final batch will prioritize attempts to falsify the remaining findings (F-01, F-04, F-08, F-13) rather than treating missing current verification as proof that dated evidence is wrong.
+
+
+
+---
+
+# Batch-7: final cross-checks, passes 31-35 of 35
+
+Snapshot: HEAD 33dea0b74ccda530306495941b74f20997369bae; only findings1 changed; no app/config/test drift. Scores PROVISIONAL. No DB, browser, screen-reader or live-provider check was executed. Reused probes are labelled; none were rerun.
+
+## Falsification attempts (pass 31 driver)
+
+- F-01 (High, release tests not in CI): NOT DISPROVED. Only one workflow exists (.github/workflows/ci.yml); it contains no reference to rel/tests, runtime_contract, test_release_contract, release_probe, hard_crash or hard-crash; mix test runs the default test root and elixirc_paths(:test) is lib + test/support, so rel/tests is outside it. Confirmed High verification gap.
+- F-04 (Medium, single-node login limiter): NOT DISPROVED. LoginLimiter.start_link registers name: __MODULE__ (login_limiter.ex:6) with no Registry/:global/:via; it is a local GenServer started once (application.ex:14). Confirmed single-node scope.
+- F-08 (Medium risk, OperationsLive polling): NOT DISPROVED. operations_live.ex explicitly avoids a PubSub subscription (line 29) and schedules a full load every 10s (lines 6,28-31,211-328). Confirmed unmeasured risk.
+- F-13 (Low, sink config vs send prerequisites): NOT DISPROVED. approved? (notifications.ex:83-93) omits approved_urls/approved_ip/https shape; send_message requires them (notifications.ex:236-239) and returns :rejected (287-289), persisted and shown in the Evidence workspace. Confirmed Low validation gap.
+- No Critical-severity finding exists in the register. The word "Critical" in the report appears only in "Critical paths traced" headings.
+
+| Pass | angle | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|-------|------|-----|-----|----|----|------|------|--------|-----|---------|
+| 31 | disprove Critical/High findings | 75 | 84 | 84 | 68 | 83 | 76 | 77 | 82 | 79.15 | 79 |
+| 32 | cross-layer composed failure modes | 74 | 84 | 84 | 68 | 83 | 76 | 77 | 82 | 78.95 | 79 |
+| 33 | missed negative paths / blocked evidence | 74 | 84 | 83 | 68 | 83 | 72 | 77 | 82 | 78.40 | 78 |
+| 34 | calibrate scores/strengths/readiness | 74 | 84 | 83 | 68 | 83 | 74 | 76 | 82 | 78.55 | 79 |
+| 35 | final reread + deduplicated reconciliation | 74 | 84 | 83 | 68 | 83 | 74 | 76 | 82 | 78.55 | 79 |
+
+Worked example Pass 31: (75*20 + 84*20 + 84*15 + 68*10 + 83*10 + 76*10 + 77*5 + 82*10)/100 = 7915/100 = 79.15 -> 79. Pass 33: (74*20 + 84*20 + 83*15 + 68*10 + 83*10 + 72*10 + 77*5 + 82*10)/100 = 7840/100 = 78.40 -> 78.
+
+## Pass 31 - Disprove Critical/High findings (fresh)
+
+Fresh code inspected: .github/workflows/ci.yml, mix.exs, login_limiter.ex, application.ex, operations_live.ex, notifications.ex, configuration.ex.
+Critical paths traced: see falsification results above. Each attempt was source-based; none succeeded in disproving a finding.
+Strengths: S-93 findings survive direct adversarial re-reading.
+Weaknesses/risks: F-01 (High, verification), F-04 (Medium), F-08 (Medium risk), F-13 (Low).
+Probe evidence: grep-based source checks only (no DB/network). Reused: none new.
+Confidence: High for F-01/F-04 source facts; Medium for F-08 impact. New 0; confirmed rechecked F-01/F-04/F-08/F-13; revised 0; retracted 0.
+
+## Pass 32 - Cross-layer composed failure modes (fresh)
+
+Fresh code inspected: oidc_controller.ex, session_controller.ex, operator_auth.ex, operations_live.ex load/else branches, notifications.ex deliver/claim, orphan_recovery_test.exs, retention.ex active_writer?, collection.ex fenced!, telemetry_collection.ex finish_state, error_html.ex.
+Composed scenarios traced (source reasoning):
+1. OIDC provider unavailable plus token sign-in: the sign-in screen offers OIDC only when Config.available? (session_html.ex); the token path is independent; failures deny with a generic 401 (oidc_controller.ex deny). No lockout of the token path.
+2. Post-start DB outage: loads fall into the else branch and redirect to /sign-in (operations_live.ex load); there is no ongoing readiness signal (F-07 limitation), so an orchestrator would not be notified by the app itself; telemetry gauges would reflect errors.
+3. VM death after a notification HTTP send but before status write: the row stays delivering; the next claim marks it ambiguous and does not resend (notifications.ex claim; orphan_recovery_test case names).
+4. Retention concurrent with pending delivery: active_writer? defers the sweep, and outbox deletion requires terminal status with no live Oban job (retention.ex).
+5. Provider partial page then crash: fence/lease takeover rejects the stale writer (:stale_lease) so no partial commit (collection.ex fenced!; hard_crash_verify assertions).
+6. Company switch while evidence is open: handle_params clears selected evidence when the company changes (operations_live.ex:40-49).
+7. Malformed provider payload: decode error becomes a source_failure with partial coverage and recorded unavailable evidence (collection.accept/fail; evidence.unavailable).
+Strengths: S-94 fail-closed composition across auth/collection/delivery/retention.
+Weaknesses/risks: F-07 (ongoing readiness), F-01, F-10.
+Probe evidence: none new (multi-layer); source-traced. Reused: none new.
+Confidence: Medium-high static; Low runtime. New 0; confirmed F-07/F-01; revised 0; retracted 0.
+
+## Pass 33 - Missed negative paths and blocked evidence (fresh)
+
+Fresh code inspected: test tree inventory, test_helper.exs, support fixtures, ACCEPTANCE_HARNESS.md, DEPLOYMENT.md, rel/tests, scripts/hard-crash-check.sh, scripts/release-native-verify.sh.
+Negative paths covered by source test names (NOT executed): cross-company denial, revoked membership on event/reconnect, CSRF, stale revision, ambiguous/retry-exhausted delivery, retention protection, replay determinism, capacity unknown/recovery, redaction malformed/UTF-8, crash takeover. Blocked evidence here: F-10 (no verified disposable DB, so zero tests executed), F-11 (no live providers), no browser/screen reader (UX/a11y), release and hard-crash harness not executed, no load/soak test.
+Missed-coverage hypotheses (NOT defects, not evidenced): multi-node login limiting, genuine multi-node job contention, TLS certificate rotation, PostgreSQL failover, clock skew beyond the 300s future-event guard, and very large tenant histories. These are unverified assumptions, listed so the owner knows what would raise confidence.
+Strengths: S-95 test intent broadly maps to critical invariants.
+Weaknesses/risks: F-10/F-11 blockers; F-01.
+Probe evidence: none. Reused: none new.
+Confidence: Low verification confidence (blocked), Medium static coverage. New 0; confirmed F-10/F-11; revised 0; retracted 0.
+
+## Pass 34 - Calibrate scores, strengths and readiness claims (fresh)
+
+Fresh code inspected: the whole register, per-pass score table, README.md, ACCEPTANCE_HARNESS.md, DEPLOYMENT.md.
+[SUPERSEDED by the Final calibration clarification] Score calibration: the provisional per-pass scores rose from 75 to about 79-80 as more strengths were traced. The final consolidated score is deliberately NOT the latest pass, the maximum, or the average. The original wording said it applied a confidence discount for unexecuted DB, browser and live-provider evidence; that blanket framing is superseded: product judgments below use source-supported quality observations, while unexecuted checks are tracked in the separate confidence column and limitations, and uncertain numbers are provisional subjective estimates.
+Final consolidated category scores (weights standard): functional correctness/completeness 72; security/privacy/isolation 84; reliability/data integrity/recovery 82; UX/accessibility 66; architecture/maintainability 82; test quality/verification 74; performance/resources 76; deployment/observability/ops readiness 82.
+Final weighted: (72*20 + 84*20 + 82*15 + 66*10 + 82*10 + 74*10 + 76*5 + 82*10)/100 = 7770/100 = 77.70 -> 78.
+Rationale: security is the strongest area (forced RLS, OIDC, SSRF, redaction) but is capped below 90 by the unproven grant-parity risk, the single-node limiter, and the identity-table tradeoff; reliability is strong by design (fencing, idempotency, honest partial/expired states) but unexecuted; functional completeness is capped by disabled integrations and no live validation; UX is capped by absence of runtime accessibility testing; test quality is capped by the DB blocker and the CI release-test gap; deployment is capped by the CI gap and no ongoing readiness route.
+Strengths: S-96 consistent, conservative, falsification-friendly design; S-97 explicit truthful-health semantics; S-98 strong auth/SSRF/redaction controls.
+Weaknesses/risks: F-01 (High verification gap), F-04/F-08 (Medium), F-13 (Low), F-02 (unproven), plus F-10/F-11 blockers.
+Production readiness verdict: NOT READY (README explicitly disclaims production/live readiness; integrations disabled by default; DB suite unexecuted; release tests not gated). No Critical or confirmed High-severity security defect was found. Product band: 75-89 solid with meaningful gaps; final 78.
+Probe evidence: reused labelled probes (batch 3/4/5). New 0; revised the reported final score versus raw pass drift; retracted 0.
+
+## Pass 35 - Final source reread and deduplicated reconciliation (fresh)
+
+Fresh code inspected: register and all accepted findings; spot re-read of database_safety.ex, tenancy.ex, operator_auth.ex, oidc.ex, transport.ex, source_config.ex, issues.ex, issue_review.ex, notifications.ex, retention.ex, replay_detectors.ex, capacity.ex, operations_live.ex, ci.yml, rel/*.
+Deduplication: F-01..F-15 are unique; F-06 (retracted), F-12 (cleared), F-15 (retracted); F-03 is a tradeoff; F-07/F-10/F-11 are limitations/blockers; H-01 is a non-finding hypothesis. No duplicate IDs or contradictory dispositions remain.
+
+## Full 35-pass score table (all passes, final)
+
+| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 75 | 75 | 75 | 75 | 76 | 76 | 77 | 76 | 76 | 77 | 77 | 78 | 78 | 78 | 78 | 78 | 78 | 78 | 78 | 79 | 79 | 79 | 79 | 79 | 79 | 79 | 80 | 80 | 80 | 79 | 79 | 79 | 78 | 79 | 79 |
+
+## Consolidated final register (deduplicated)
+
+Defects and risks (none disproved):
+- F-01 High (verification/CI): ops_brain/rel/tests release-contract suites are not invoked by .github/workflows/ci.yml:70-78; only one workflow exists; mix test excludes rel/tests. Impact: migration/preflight/backup/restore/role regressions are ungated. Fix: add CI steps for the Elixir runtime-contract tests and Python release-contract tests against the disposable DB/roles; regression: CI fails on a deliberately broken preflight. Effort M.
+- F-04 Medium: LoginLimiter is a local GenServer (login_limiter.ex:6), one per BEAM; multi-node/restart resets limits. Fix: shared limiter or document single-node constraint. Effort S.
+- F-08 Medium risk (unmeasured): OperationsLive does a full 10s load per socket with no PubSub invalidation (operations_live.ex:6,28-31,211-328). Fix: measure, then PubSub-scoped invalidation/adaptive interval. Effort M.
+- F-02 Low (unproven): priv/repo/runtime_grants.sql vs rel/runtime-grants.sql differ; effective privilege parity NOT DB-tested. Fix: single source of truth or parity test. Effort S.
+- F-05 Low (intentional dev only): dev auto-login defaults on for :dev (dev_auto_login.ex:20-50; dev.exs:20-24); compile-gated, no production path.
+- F-09 Low/Medium maintainability: operations_live.ex is 908 lines.
+- F-13 Low (source-confirmed validation gap, visible not silent): sink config passes load without the approved_urls/approved_ip/https prerequisites send_message requires (notifications.ex:83-93,236-239,287-289); non-delivery is persisted and shown in the Evidence workspace.
+- F-14 Low (optional, unverified a11y): shared table component th lacks scope (core_components.ex:378); no production consumer.
+
+Tradeoff (not a defect): F-03 identity/control-plane tables (operators, companies, memberships) have no RLS; all traced operator-facing consumers are membership-scoped (tenancy.ex:14-21,29-31,62,88-90).
+
+Limitations/blockers (not defects): F-07 (startup preflight + liveness present at preflight.exs:10-45 / release-command:28-33 / healthcheck:9; ongoing DB-aware readiness not demonstrated); F-10 (no verified disposable DB, so the 260 test definitions were not executed); F-11 (collection/delivery/OIDC disabled by default; no live-provider validation).
+
+Cleared/retracted: F-06, F-12, F-15. Non-finding hypothesis: H-01 (OIDC.HTTP does not IP-pin like Transport; no exploit path evidenced).
+
+## Top strengths (concrete)
+
+S-01 forced RLS on all 17 tenant tables plus a startup DatabaseSafety gate refusing owner/BYPASSRLS and enforcing append-only audit grants (database_safety.ex:9-52); S-05 robust OIDC single-use state/PKCE/strict verification (oidc.ex:33-130; oidc/attempts.ex:12-24); S-08 SSRF pin+original-host TLS+allowlist+byte caps (transport.ex:3-97; operation_policy.ex); S-14 transactional revision-fenced review with atomic audit (issue_review.ex); S-58 idempotent occurrence/revision model (issues.ex); S-73 uncertainty-first capacity forecasts (capacity.ex); S-75/S-82 truthful unknown/expired/partial states and deterministic replay (issues.ex, replay_detectors.ex); S-85/S-86 navigation semantics, focus management, responsive and reduced-motion CSS (layouts.ex; app.css:2280,2375,2377,2410,2412); S-88/S-89 approval-gated migration/preflight and least-privilege roles (migrate.exs, roles.sql).
+
+## Top weaknesses
+
+1. F-10 unexecuted DB suite (verification blocker). 2. F-01 release tests not in CI. 3. F-04 single-node limiter. 4. F-08 unmeasured polling cost. 5. F-13 config/delivery validation mismatch; F-02 unproven grant parity.
+
+## Production readiness and blockers
+
+Verdict: NOT READY for production. Blockers: (1) README/live gates disclaim production and live-provider validation; (2) the DB-backed suite was never executed here (F-10); (3) release-contract tests are not CI-gated (F-01); (4) integrations are disabled by default (F-11). A high aggregate does not cancel these. Local/demo use is credible from source and static evidence.
+
+## Prioritized remediation roadmap (recommendations only)
+
+Immediate (before any production claim): run the full suite on a verified disposable DB with distinct runtime/migrator roles (F-10); wire rel/tests + validate_config + release verify + hard-crash into CI (F-01).
+Next iteration: add a shared/durable login limiter or document single-node (F-04); extend sink config validation to send prerequisites (F-13); measure OperationsLive refresh cost and add PubSub invalidation (F-08); optionally expose ongoing readiness (F-07).
+Later/architectural: split operations_live.ex (F-09); single-source the grants or add a parity test (F-02); consider RLS/defense-in-depth for identity tables (F-03); add scope to the shared table component if it gains a consumer (F-14); copy dated /tmp evidence artifacts to a durable store (optional traceability).
+Quick wins: F-01, F-13, F-02 parity test. Architectural investments: F-08, F-09, F-03.
+
+## Evidence limitations and unresolved questions
+
+No disposable DB, so all DB behavior (RLS, fencing, retention, idempotency, replay) is source-traced, not executed. No browser/screen reader, so accessibility is unverified at runtime. No live provider, so adapter correctness is source-traced only. No load test, so performance is unquantified. Reused pure probes apply only to their exact inputs. Unresolved: multi-node behavior, certificate rotation, PostgreSQL failover, and the impact magnitude of F-08.
+
+## Completion
+
+Passes completed: 35 of 35. This statement is true: each pass has a separately labeled section in findings1, all eight categories were scored per pass, and the weighted arithmetic is shown. findings1 is the only file written. findings2 and any fixes remain out of scope pending user/Main direction.
+
+
+---
+
+# Final reconciliation addendum (Main report-c4738588-e848-43ff-abb5-53b269336ab4)
+
+Preserves all prior text. Corrections below are authoritative for arithmetic and scope; no code, DB, browser or network checks.
+
+## Arithmetic corrections (four raw values)
+
+Main's mechanical recomputation is confirmed. The batch-7 table raw values were wrong for four rows; rounded overalls were unchanged. Corrected: Pass 31 79.35 -> 79.15; Pass 33 78.25 -> 78.40; Pass 34 78.45 -> 78.55; Pass 35 78.45 -> 78.55. Worked examples recomputed: Pass 31 sum 7915/100 = 79.15; Pass 33 sum 7840/100 = 78.40. The four table rows and the worked-example line were corrected in place. Rounded overalls remain 79, 78, 79, 79.
+
+## Full 35-row mechanically recomputed score table
+
+This table accounts for the earlier Pass 2 security correction (84 -> 85, raw 75.25) and Pass 30 test correction (74 -> 75, raw 79.05). Rows are recomputed from the recorded category scores with the standard weights.
+
+| Pass | func | sec | rel | ux | arch | test | perf | deploy | raw | overall |
+|------|------|-----|-----|----|----|----|------|--------|-----|---------|
+| 1 | 68 | 82 | 78 | 62 | 80 | 72 | 75 | 78 | 74.65 | 75 |
+| 2 | 68 | 85 | 78 | 62 | 80 | 72 | 75 | 78 | 75.25 | 75 |
+| 3 | 69 | 84 | 79 | 62 | 80 | 72 | 75 | 78 | 75.40 | 75 |
+| 4 | 69 | 82 | 80 | 62 | 80 | 73 | 75 | 79 | 75.35 | 75 |
+| 5 | 70 | 82 | 80 | 63 | 80 | 73 | 75 | 79 | 75.65 | 76 |
+| 6 | 71 | 82 | 80 | 63 | 80 | 73 | 75 | 79 | 75.85 | 76 |
+| 7 | 72 | 83 | 81 | 63 | 81 | 73 | 75 | 79 | 76.50 | 77 |
+| 8 | 71 | 82 | 80 | 66 | 80 | 73 | 75 | 79 | 76.15 | 76 |
+| 9 | 71 | 82 | 80 | 66 | 80 | 73 | 76 | 81 | 76.40 | 76 |
+| 10 | 72 | 83 | 81 | 66 | 81 | 74 | 76 | 81 | 77.15 | 77 |
+| 11 | 72 | 84 | 81 | 66 | 81 | 74 | 76 | 81 | 77.35 | 77 |
+| 12 | 72 | 85 | 81 | 66 | 81 | 74 | 76 | 81 | 77.55 | 78 |
+| 13 | 72 | 85 | 82 | 66 | 82 | 74 | 76 | 81 | 77.80 | 78 |
+| 14 | 72 | 85 | 81 | 66 | 81 | 74 | 76 | 81 | 77.55 | 78 |
+| 15 | 72 | 85 | 81 | 66 | 82 | 74 | 76 | 81 | 77.65 | 78 |
+| 16 | 73 | 84 | 82 | 67 | 82 | 75 | 76 | 81 | 78.00 | 78 |
+| 17 | 73 | 84 | 82 | 67 | 82 | 75 | 76 | 81 | 78.00 | 78 |
+| 18 | 73 | 84 | 83 | 67 | 82 | 75 | 76 | 81 | 78.15 | 78 |
+| 19 | 74 | 84 | 83 | 67 | 82 | 75 | 76 | 81 | 78.35 | 78 |
+| 20 | 74 | 84 | 84 | 67 | 83 | 75 | 76 | 82 | 78.70 | 79 |
+| 21 | 74 | 84 | 84 | 67 | 83 | 76 | 77 | 82 | 78.85 | 79 |
+| 22 | 74 | 84 | 84 | 67 | 83 | 76 | 77 | 82 | 78.85 | 79 |
+| 23 | 75 | 84 | 84 | 67 | 83 | 76 | 77 | 82 | 79.05 | 79 |
+| 24 | 75 | 84 | 84 | 68 | 83 | 76 | 77 | 82 | 79.15 | 79 |
+| 25 | 75 | 84 | 85 | 68 | 83 | 76 | 77 | 82 | 79.30 | 79 |
+| 26 | 75 | 85 | 84 | 68 | 83 | 76 | 77 | 82 | 79.35 | 79 |
+| 27 | 75 | 84 | 85 | 68 | 84 | 77 | 77 | 82 | 79.50 | 80 |
+| 28 | 75 | 84 | 84 | 72 | 83 | 77 | 77 | 82 | 79.65 | 80 |
+| 29 | 75 | 85 | 85 | 68 | 83 | 76 | 77 | 84 | 79.70 | 80 |
+| 30 | 75 | 84 | 84 | 68 | 83 | 75 | 77 | 82 | 79.05 | 79 |
+| 31 | 75 | 84 | 84 | 68 | 83 | 76 | 77 | 82 | 79.15 | 79 |
+| 32 | 74 | 84 | 84 | 68 | 83 | 76 | 77 | 82 | 78.95 | 79 |
+| 33 | 74 | 84 | 83 | 68 | 83 | 72 | 77 | 82 | 78.40 | 78 |
+| 34 | 74 | 84 | 83 | 68 | 83 | 74 | 76 | 82 | 78.55 | 79 |
+| 35 | 74 | 84 | 83 | 68 | 83 | 74 | 76 | 82 | 78.55 | 79 |
+
+## Final eight-category score table (weights, score, weighted contribution, rationale, confidence)
+
+Evidence confidence is reported SEPARATELY from the product score. Missing evidence lowers CONFIDENCE; it did not mechanically lower the scores below their category-specific quality ceilings. The final 78 is a reasoned consolidation, not the maximum or the average of the pass scores.
+
+| Category | Weight | Score | Weighted contribution | Evidence-based rationale | Evidence confidence |
+|----------|--------|-------|-----------------------|--------------------------|---------------------|
+| Functional correctness and completeness | 20% | 72 | 14.40 | All local/demo read journeys and route surfaces are implemented and source-traced; the disabled-by-default posture is intentional and not a defect. Product factors: offline/demo journeys are coherent and observable; the sink config-vs-send validation mismatch (F-13) is a small functional-validation gap. Live-provider behavior is not product-observed, which lowers confidence, not the product judgment. Provisional subjective estimate. | Medium |
+| Security, privacy and company isolation | 20% | 84 | 16.80 | Forced RLS on 17 tenant tables plus a startup role/RLS/audit gate (database_safety.ex:9-52); robust single-use OIDC with strict verification; SSRF pinning and allowlists; redaction before persistence. Product observations: strong isolation design; the local-only limiter (F-04) and identity-table tradeoff (F-03) are source-supported design properties. Grant parity (F-02) is a verification limitation tracked in confidence. Provisional subjective estimate. | Medium-High |
+| Reliability, data integrity and recovery | 15% | 82 | 12.30 | Fenced leases, idempotent occurrence/revision model, ambiguous-not-replayed delivery, honest partial/expired states, bounded retention; coherent source-supported design. DB behavior was not executed here, which lowers confidence, not the product judgment. Provisional subjective estimate. | Medium |
+| UX and accessibility | 10% | 66 | 6.60 | Static semantics, focus management, responsive breakpoints and reduced-motion CSS are source-supported (layouts.ex; app.css:2280,2375,2377,2410,2412). Absence of runtime screen-reader/contrast/keyboard evaluation lowers confidence, not the product judgment. Provisional subjective estimate. | Low |
+| Architecture and maintainability | 10% | 82 | 8.20 | Clear module boundaries and pure policy modules (lifecycle, capacity, correlation, redactor). Capped by the 908-line OperationsLive and two grant definitions that can diverge. | Medium-High |
+| Test quality and verification coverage | 10% | 74 | 7.40 | 260 invariant-oriented test definitions and an explicit disposable-DB gate. Verification coverage gap: release-contract tests are not CI-gated (F-01) and mix test excludes rel/tests; that CI coverage gap is a product-relevant verification defect. Not executing the suite here lowers confidence, not the score. Provisional subjective estimate. | Medium |
+| Performance and resource efficiency | 5% | 76 | 3.80 | Bounded queries, targeted read indexes, per-source budgets and queue caps. Source-supported unmeasured risk: OperationsLive full 10s polling (F-08). No load test was run, which lowers confidence. Provisional subjective estimate. | Low-Medium |
+| Deployment, observability and operational readiness | 10% | 82 | 8.20 | Approval-gated migration/preflight, least-privilege roles, bounded telemetry, documented backup/restore. Source-supported operational limitation: no ongoing DB-aware readiness signal (F-07). The release-test CI gap (F-01) is tracked under test quality. Provisional subjective estimate. | Medium-High |
+| Total | 100% | - | 77.70 -> 78 | Weighted sum shown; clamp 1-100. | - |
+
+Arithmetic: 72*20 + 84*20 + 82*15 + 66*10 + 82*10 + 74*10 + 76*5 + 82*10 = 7770; 7770/100 = 77.70 -> 78.
+
+## Scope-corrected conclusions
+
+- Disabled-by-default collection, delivery and OIDC are intentional safety controls, not functional defects, and there is no requirement to enable them. They are not by themselves a reason to reduce the product score.
+- Absent live-provider acceptance and absent an approved deployment are RELEASE ACCEPTANCE BLOCKERS, not product defects. Additional blockers: the DB-backed suite was not executed here (F-10) and release-contract tests are not CI-gated (F-01).
+- The final 78 differs from the high-70s per-pass scores because of the category-specific ceilings in the table above, not a blanket formula or an automatic deduction for missing evidence.
+
+## Separated register (deduplicated, no optional item treated as mandatory)
+
+Confirmed gaps:
+- F-01 High: release-contract tests (ops_brain/rel/tests) are not invoked by the single .github/workflows/ci.yml:70-78; mix test excludes rel/tests. Verification gap, not a runtime defect. Fix: add CI steps.
+- F-13 Low: sink deployment-config validation passes without the approved_urls/approved_ip/https prerequisites send_message requires (notifications.ex:83-93 vs 236-239); non-delivery is persisted and shown in the Evidence workspace. Fix: align validation.
+
+Conditional/unmeasured risks (not confirmed defects):
+- F-04 Medium conditional: LoginLimiter is a local GenServer (login_limiter.ex:6); matters only for multi-node/restart deployments. Conditional on deployment topology.
+- F-08 Medium conditional: OperationsLive full 10s load per socket (operations_live.ex:6,28-31,211-328); impact unmeasured. Conditional on load.
+- F-02 Low unproven: two grant scripts differ; effective privilege parity not DB-tested. Conditional on pre-existing grants/default PUBLIC rights.
+
+Optional improvements (not defects):
+- F-14: optional scope on the shared table component; no production consumer.
+- F-09: optional split of the 908-line OperationsLive.
+- F-15 retracted; optional durable traceability for dated /tmp evidence artifacts only.
+
+Intentional dev-only tradeoff:
+- F-05: dev auto-login defaults on for :dev (dev_auto_login.ex:20-50; dev.exs:20-24); compile-gated to :dev, no production path.
+
+Limitations/blockers:
+- F-07: startup preflight (preflight.exs:10-45; release-command:28-33) and liveness (healthcheck:9) exist; ongoing DB-aware readiness not demonstrated.
+- F-10: no verified disposable DB, so no test was executed here.
+- F-11: no live-provider validation performed.
+
+Intentional tradeoff:
+- F-03: identity/control-plane tables are outside RLS; all traced operator-facing consumers are membership-scoped (tenancy.ex:14-21,29-31,62,88-90). Recommended tenant RLS on identity tables is CONDITIONAL on a demonstrated cross-tenant need and compatibility, not an architectural obligation.
+
+Cleared/retracted: F-06, F-12, F-15. Hypothesis non-finding: H-01.
+
+## Completion
+
+Passes completed: 35 of 35. Final consolidated weighted score: 78/100. Production readiness: NOT READY (release-acceptance blockers above). findings1 is the only file written; findings2 and fixes remain out of scope pending user/Main direction.
+
+
+---
+
+# Final calibration clarification (Main report-428a7994-63c6-4d53-92e8-2b73dea31fc4)
+
+Preserves all prior text. This addendum removes the last internal contradiction by separating product judgment from evidence confidence; no code, DB, browser or network checks. Arithmetic is unchanged.
+
+## Superseded wording
+
+- The banner no longer calls the final score "confidence-discounted"; it now says the score is a reasoned consolidation with evidence confidence reported separately. The banner line was edited in place.
+- The Pass 34 sentence that applied a blanket "confidence discount" is marked [SUPERSEDED] in place. Blanket missing-evidence deductions are replaced by the category-specific treatment below.
+
+## Principle applied
+
+Product-category judgments use source-supported quality observations. Unexecuted DB/browser/live checks are recorded in the separate Evidence confidence column and in the Limitations section, not used as score caps. Numbers that cannot be fully evidenced are explicitly labeled provisional subjective estimates rather than evidence-derived values.
+
+## Category treatment after clarification
+
+- Functional: source-supported offline/demo journeys; small F-13 validation gap; live-provider behavior unobserved lowers confidence only.
+- Security: strong source-supported isolation/OIDC/SSRF/redaction; F-04 and F-03 are source-supported design properties; F-02 grant parity moved to confidence.
+- Reliability: source-supported fencing/idempotency/honest-state design; unexecuted DB behavior lowers confidence only.
+- UX: source-supported semantics/focus/responsive/reduced-motion; unexecuted runtime evaluation lowers confidence only.
+- Architecture: source-supported boundaries; large OperationsLive and duplicated grant definitions are optional/maintainability observations.
+- Test quality: the F-01 CI coverage gap (release tests not gated; mix test excludes rel/tests) is a genuine product-relevant verification defect and stays here; F-10 is a confidence/limitation item.
+- Performance: F-08 unmeasured 10s polling is a source-supported unmeasured risk; absence of a load test lowers confidence.
+- Deployment/ops: F-07 (no ongoing readiness signal) is a source-supported operational limitation; F-01 is tracked under test quality.
+
+## Status
+
+Final consolidated weighted score unchanged: 78/100 (7770/100 = 77.70 -> 78). Register and separated dispositions unchanged. Passes completed: 35 of 35. Production readiness: NOT READY (release-acceptance blockers: live-provider acceptance, approved deployment, unexecuted DB suite, and release-test CI gap). findings1 is the only file written.

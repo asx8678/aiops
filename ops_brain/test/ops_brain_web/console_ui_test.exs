@@ -36,7 +36,11 @@ defmodule OpsBrainWeb.ConsoleUITest do
 
   test "Constellation branding persists throughout authorized navigation", f do
     for path <-
-          ["/", "/companies/#{f.a.id}", "/companies/#{f.a.id}/sources/#{f.source_a.id}"] ++
+          [
+            "/companies/#{f.a.id}/command",
+            "/companies/#{f.a.id}",
+            "/companies/#{f.a.id}/sources/#{f.source_a.id}"
+          ] ++
             Enum.map(
               ~w(pipelines services investigations capacity source-health),
               &"/companies/#{f.a.id}/#{&1}"
@@ -61,30 +65,31 @@ defmodule OpsBrainWeb.ConsoleUITest do
     refute LazyHTML.text(html) =~ ~r/ops\s*brain/i
   end
 
-  test "home opens the authorized workspace without a company chooser", f do
-    {:ok, view, _} = live(f.conn, "/")
-    assert has_element?(view, "nav[aria-label='Main navigation'] a[aria-current='page']", "Home")
-    assert has_element?(view, "h1", "A clearer view of operations.")
-    assert has_element?(view, ".portfolio-intro .intro-art")
-    assert has_element?(view, "#home-workspace[data-company-id='#{f.a.id}']")
-    refute has_element?(view, "#home-workspace[data-company-id='#{f.b.id}']")
-    refute has_element?(view, "#companies, #company-search, a.workspace-switch")
+  test "home lands on the authorized workspace command center without a chooser", f do
+    command = "/companies/#{f.a.id}/command"
+    assert {:error, {:redirect, %{to: ^command}}} = live(f.conn, "/")
+
+    {:ok, view, _} = live(f.conn, "/companies/#{f.a.id}/command")
+
+    assert has_element?(
+             view,
+             "nav[aria-label='Main navigation'] a[aria-current='page'][href='/companies/#{f.a.id}/command']"
+           )
+
     assert has_element?(view, "#workspace-identity strong", f.a.name)
+    refute has_element?(view, "#companies, #company-search, a.workspace-switch")
+    refute has_element?(view, "#home-workspace[data-company-id='#{f.b.id}']")
 
-    for env <- ~w(dev staging prod) do
-      assert has_element?(
-               view,
-               "#home-environment-#{env}[href='/companies/#{f.a.id}/services?environment=#{env}']"
-             )
-    end
-
-    view |> element("#refresh") |> render_click()
-    assert has_element?(view, "#home-workspace[data-company-id='#{f.a.id}']")
+    view |> element("#refresh-command") |> render_click()
+    assert has_element?(view, "#workspace-identity strong", f.a.name)
   end
 
-  test "home refresh reauthorizes expired sessions", f do
-    {:ok, view, _} = live(f.conn, "/")
-    Accounts.revoke_session(f.token_a)
+  test "landing refresh reauthorizes expired sessions", f do
+    conn = init_test_session(build_conn(), operator_token: f.token_dual)
+
+    # ambiguous membership: the landing renders its workspace-error frame
+    {:ok, view, _} = live(conn, "/")
+    Accounts.revoke_session(f.token_dual)
     view |> element("#refresh") |> render_click()
     assert_redirect(view, "/sign-in")
   end

@@ -11,17 +11,19 @@ defmodule OpsBrainWeb.OperationsLive do
         summary: [],
         query: "",
         environment: "",
+        focus_id: nil,
         filter_form: to_form(%{"query" => "", "environment" => ""}),
         refreshed_at: nil,
         runs: [],
         sources: [],
         services: [],
         windows: [],
+        forecasts_count: 0,
         selected_evidence: nil,
         evidence_company: nil
       )
 
-    {:ok, stream(socket, :groups, [])}
+    {:ok, socket |> stream(:groups, []) |> stream(:forecasts, []) |> stream(:audit_events, [])}
   end
 
   def handle_info(:refresh, socket) do
@@ -35,6 +37,15 @@ defmodule OpsBrainWeb.OperationsLive do
       if socket.assigns.live_action in [:services, :capacity],
         do: environment(params["environment"]),
         else: ""
+
+    # A deep-linked ?focus=<group_id> finding opens its evidence once the
+    # authorized list loads (see focus_evidence/2); malformed values never
+    # match a loaded group.
+    focus =
+      if(socket.assigns.live_action == :investigations,
+        do: focus_param(params["focus"]),
+        else: nil
+      )
 
     # R22: never reuse tenant-specific evidence across a company switch.
     socket =
@@ -53,6 +64,7 @@ defmodule OpsBrainWeb.OperationsLive do
           company_name: company.name,
           query: "",
           environment: environment,
+          focus_id: focus,
           filter_form: to_form(%{"query" => "", "environment" => environment})
         )
       )
@@ -81,67 +93,153 @@ defmodule OpsBrainWeb.OperationsLive do
   end
 
   def handle_event("close-evidence", _, socket),
-    do: {:noreply, assign(socket, :selected_evidence, nil)}
+    do:
+      {:noreply,
+       socket |> assign(:selected_evidence, nil) |> stream(:audit_events, [], reset: true)}
 
-  def handle_event("snooze", %{"id" => id}, socket) do
-    case Issues.snooze(socket.assigns.current_scope, id, DateTime.add(Store.now(), 3600)) do
-      {:ok, row} when is_map(row) -> load(socket)
-      {:error, :unauthorized} -> {:noreply, redirect(socket, to: ~p"/sign-in")}
-      _ -> {:noreply, put_flash(socket, :error, "Snooze could not be saved.")}
-    end
+  def handle_event("snooze", %{"id" => id} = params, socket) do
+    result =
+      Issues.snooze(
+        socket.assigns.current_scope,
+        id,
+        DateTime.add(Store.now(), 3600),
+        action_options(params)
+      )
+
+    finish_action(result, socket, "Snooze could not be saved.")
   end
 
-  def handle_event("assign", %{"id" => id, "owner" => owner}, socket) do
+  def handle_event("assign", %{"id" => id, "owner" => owner} = params, socket)
+      when is_binary(owner) do
+    opts = action_options(params)
+
     result =
       if String.trim(owner) == "",
-        do: Issues.unassign(socket.assigns.current_scope, id),
-        else: Issues.assign(socket.assigns.current_scope, id, owner)
+        do: Issues.unassign(socket.assigns.current_scope, id, opts),
+        else: Issues.assign(socket.assigns.current_scope, id, owner, opts)
 
-    case result do
-      {:ok, row} when is_map(row) -> load(socket)
-      {:error, :unauthorized} -> {:noreply, redirect(socket, to: ~p"/sign-in")}
-      _ -> {:noreply, put_flash(socket, :error, "Assignment could not be saved.")}
-    end
+    finish_action(result, socket, "Assignment could not be saved.")
   end
 
-  def handle_event("review", %{"id" => id, "status" => status}, socket) do
-    case Issues.review(socket.assigns.current_scope, id, status) do
-      {:ok, %{}} ->
-        load(socket)
+  def handle_event("review", %{"id" => id, "status" => status} = params, socket) do
+    result = Issues.review(socket.assigns.current_scope, id, status, action_options(params))
 
-      {:error, :unauthorized} ->
-        {:noreply, redirect(socket, to: ~p"/sign-in")}
-
-      {:ok, nil} ->
-        {:noreply, put_flash(socket, :error, "Finding unavailable. Refresh and try again.")}
-
-      {:error, _} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "Review could not be saved. Refresh and check the current state."
-         )}
-    end
+    finish_action(
+      result,
+      socket,
+      "Review could not be saved. Refresh and check the current state."
+    )
   end
+
+  def handle_event(event, _params, socket) when event in ["assign", "review", "snooze"],
+    do: {:noreply, put_flash(socket, :error, "Invalid local action. Refresh and try again.")}
 
   def handle_event("evidence", %{"id" => id}, socket) do
-    scope = socket.assigns.current_scope
-
-    with {:ok, items} <- Issues.evidence(scope, id),
-         {:ok, revisions} <- Issues.revisions(scope, id),
-         {:ok, notifications} <- Notifications.status(scope, id) do
-      {:noreply,
-       assign(socket, :selected_evidence, %{
-         group_id: id,
-         items: items,
-         revisions: revisions,
-         notifications: notifications
-       })}
-    else
+    case load_evidence(socket.assigns.current_scope, id) do
+      {:ok, bundle} -> {:noreply, mount_evidence(socket, bundle)}
       _ -> {:noreply, redirect(socket, to: ~p"/sign-in")}
     end
   end
+
+  # A ?focus=<group_id> deep link opens that finding's evidence only when the
+  # id belongs to a finding visible in the current authorized, filtered set.
+  # Nonexistent, foreign-company or filtered-out ids are silently ignored —
+  # never leaking whether any other group exists — and the focus is one-shot,
+  # so a later refresh closes evidence like any manually opened panel.
+  defp focus_evidence(socket, groups) do
+    case socket.assigns.focus_id do
+      nil ->
+        socket
+
+      focus ->
+        socket = assign(socket, :focus_id, nil)
+
+        if Enum.any?(groups, &(&1["id"] == focus)) do
+          case load_evidence(socket.assigns.current_scope, focus) do
+            {:ok, bundle} -> mount_evidence(socket, bundle)
+            _ -> socket
+          end
+        else
+          socket
+        end
+    end
+  end
+
+  # The focus id is bounded; anything longer or non-binary can never match a
+  # loaded group and is ignored without reaching the database.
+  defp focus_param(value) when is_binary(value), do: String.slice(value, 0, 64)
+
+  defp focus_param(_), do: nil
+
+  defp load_evidence(scope, id) do
+    with {:ok, items} <- Issues.evidence(scope, id),
+         {:ok, revisions} <- Issues.revisions(scope, id),
+         {:ok, notifications} <- Notifications.status(scope, id),
+         {:ok, audit} <- Issues.audit_history(scope, id) do
+      {:ok,
+       %{
+         selected_evidence: %{
+           group_id: id,
+           items: items,
+           revisions: revisions,
+           notifications: notifications,
+           audit_count: length(audit)
+         },
+         audit: audit
+       }}
+    end
+  end
+
+  defp mount_evidence(socket, %{selected_evidence: selected, audit: audit}) do
+    socket
+    |> assign(:selected_evidence, selected)
+    |> stream(:audit_events, Enum.map(audit, &Map.put(&1, :id, &1["id"])), reset: true)
+  end
+
+  defp action_options(params), do: [expected_revision: revision_param(params["revision"])]
+
+  defp revision_param(value) when is_integer(value), do: value
+
+  defp revision_param(value) when is_binary(value) and byte_size(value) <= 10 do
+    case Integer.parse(value) do
+      {revision, ""} -> revision
+      _ -> nil
+    end
+  end
+
+  defp revision_param(_), do: nil
+
+  defp finish_action({:ok, row}, socket, _) when is_map(row),
+    do: load(clear_flash(socket, :error))
+
+  defp finish_action({:error, :unauthorized}, socket, _),
+    do: {:noreply, redirect(socket, to: ~p"/sign-in")}
+
+  defp finish_action({:error, :stale_revision}, socket, _),
+    do:
+      load(
+        put_flash(
+          socket,
+          :error,
+          "This finding changed since you viewed it. Your action was not saved. Review the refreshed state and try again."
+        )
+      )
+
+  defp finish_action({:error, reason}, socket, _)
+       when reason in [:revision_required, :invalid_revision, :invalid_options],
+       do:
+         load(
+           put_flash(
+             socket,
+             :error,
+             "A valid displayed revision is required. Your action was not saved; refresh and try again."
+           )
+         )
+
+  defp finish_action({:ok, nil}, socket, _),
+    do: load(put_flash(socket, :error, "Finding unavailable. Refresh and try again."))
+
+  defp finish_action(_, socket, message), do: {:noreply, put_flash(socket, :error, message)}
 
   defp environment(value) when value in ["dev", "staging", "prod"], do: value
   defp environment(_), do: ""
@@ -155,11 +253,19 @@ defmodule OpsBrainWeb.OperationsLive do
     {services, Enum.filter(windows, &MapSet.member?(ids, &1["service_id"]))}
   end
 
+  defp capacity_evaluations(:capacity, scope, environment, now),
+    do: Services.capacity_evaluations(scope, environment, now)
+
+  defp capacity_evaluations(_action, _scope, _environment, _now), do: {:ok, []}
+
   # R21: each route loads only the data it renders instead of every dataset.
   defp load(socket) do
     scope = socket.assigns.current_scope
     # Never keep an expired evidence snapshot across a refresh or navigation.
-    socket = assign(socket, selected_evidence: nil, refreshed_at: Store.now())
+    socket =
+      socket
+      |> assign(selected_evidence: nil, refreshed_at: Store.now())
+      |> stream(:audit_events, [], reset: true)
 
     case socket.assigns.live_action do
       :investigations ->
@@ -176,10 +282,14 @@ defmodule OpsBrainWeb.OperationsLive do
                Enum.map(groups, fn group ->
                  group
                  |> Map.put(:id, group["id"])
-                 |> Map.put(:owner_form, to_form(%{"owner" => group["owner"] || ""}))
+                 |> Map.put(
+                   :owner_form,
+                   to_form(%{"owner" => group["owner"] || "", "revision" => group["revision"]})
+                 )
                end),
                reset: true
-             )}
+             )
+             |> focus_evidence(groups)}
 
           _ ->
             {:noreply, redirect(socket, to: ~p"/sign-in")}
@@ -187,14 +297,31 @@ defmodule OpsBrainWeb.OperationsLive do
 
       action when action in [:services, :capacity] ->
         with {:ok, services} <- Services.overview(scope),
-             {:ok, windows} <- Services.windows(scope) do
+             {:ok, windows} <- Services.windows(scope),
+             {:ok, forecasts} <-
+               capacity_evaluations(
+                 action,
+                 scope,
+                 socket.assigns.environment,
+                 socket.assigns.refreshed_at
+               ) do
           {services, windows} = environment_records(services, windows, socket.assigns.environment)
+
+          summary =
+            UI.summaries(
+              action,
+              {services, if(action == :capacity, do: forecasts, else: windows)}
+            )
+
+          forecasts = filter_records(forecasts, socket.assigns.query)
 
           {:noreply,
            socket
-           |> assign(:summary, UI.summaries(action, {services, windows}))
+           |> assign(:summary, summary)
            |> assign(:services, filter_records(services, socket.assigns.query))
-           |> assign(:windows, filter_records(windows, socket.assigns.query))}
+           |> assign(:windows, filter_records(windows, socket.assigns.query))
+           |> assign(:forecasts_count, length(forecasts))
+           |> stream(:forecasts, Enum.map(forecasts, &Map.put(&1, :id, &1["id"])), reset: true)}
         else
           _ -> {:noreply, redirect(socket, to: ~p"/sign-in")}
         end
@@ -415,6 +542,73 @@ defmodule OpsBrainWeb.OperationsLive do
             Capacity forecasts appear only when a reviewed policy, explicit service mapping, and sufficient fresh history exist. Unknown is not healthy.
           </p>
         </div>
+        <section :if={@live_action == :capacity} id="capacity-evaluations" class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Stored capacity evaluations</h2>
+              <p>
+                Conditional estimates from retained evidence, not current health or outage deadlines.
+              </p>
+            </div>
+            <UI.badge label={"#{@forecasts_count} shown"} />
+          </div>
+          <p class="panel-note">
+            Unexpired evaluations only. Environment filtering precedes the 100-record limit;
+            unmapped evidence appears only under All environments. Summary counts are before text search.
+          </p>
+          <UI.empty
+            :if={@forecasts_count == 0}
+            icon="hero-chart-bar"
+            title={
+              if @query == "",
+                do: "No retained capacity evaluations",
+                else: "No matching capacity evaluations"
+            }
+            description="No forecast is not a healthy result. Expired evidence is excluded; supporting windows alone are not a capacity evaluation."
+          />
+          <div id="capacity-results" phx-update="stream">
+            <article :for={{dom_id, forecast} <- @streams.forecasts} id={dom_id} class="observation">
+              <div class="observation-head">
+                <div>
+                  <h3>
+                    {forecast["service_key"] || "Unmapped service"}
+                    <span class="muted">/ {forecast["profile"] || "Unknown profile"}</span>
+                  </h3>
+                  <p class="observation-meta">
+                    Environment: {forecast["environment"] || "unmapped"} · window ended {UI.timestamp(
+                      forecast["occurred_at"]
+                    )}
+                  </p>
+                </div>
+                <UI.badge value={forecast["result"]["condition"]} />
+              </div>
+              <p
+                :if={
+                  forecast["result"]["condition"] in ["normal", "warning", "critical"] &&
+                    is_number(forecast["result"]["seconds_to_threshold"]) &&
+                    forecast["result"]["seconds_to_threshold"] >= 0
+                }
+                class="forecast-estimate"
+              >
+                Conditional time to threshold: {Float.round(
+                  forecast["result"]["seconds_to_threshold"] / 60,
+                  1
+                )} minutes
+              </p>
+              <p class="forecast-reason">
+                {forecast["result"]["reason"] || "No retained explanation"}
+              </p>
+              <p class="muted tiny">
+                Evaluated as of {UI.timestamp(forecast["data"]["as_of"])} · received {UI.timestamp(
+                  forecast["received_at"]
+                )} · expires {UI.timestamp(forecast["expires_at"])}
+              </p>
+              <details>
+                <summary>Inspect retained capacity evidence</summary><pre>{Jason.encode!(forecast["data"], pretty: true)}</pre>
+              </details>
+            </article>
+          </div>
+        </section>
         <section class="panel">
           <div class="panel-heading">
             <div>
@@ -588,6 +782,11 @@ defmodule OpsBrainWeb.OperationsLive do
                 class="owner-form"
               >
                 <.input
+                  field={g.owner_form[:revision]}
+                  id={"assign-revision-#{g["id"]}"}
+                  type="hidden"
+                />
+                <.input
                   field={g.owner_form[:owner]}
                   id={"owner-#{g["id"]}"}
                   label="Local owner (blank to unassign)"
@@ -598,19 +797,23 @@ defmodule OpsBrainWeb.OperationsLive do
             </div><div class="issue-actions">
               <button class="btn btn-primary" phx-click="evidence" phx-value-id={g["id"]}><.icon name="hero-magnifying-glass" />Inspect evidence</button><button
                 class="btn"
+                id={"snooze-#{g["id"]}"}
                 phx-click="snooze"
                 phx-value-id={g["id"]}
+                phx-value-revision={g["revision"]}
                 phx-disable-with="Saving…"
               ><.icon name="hero-clock" />Snooze locally · 1h</button><button
                 class="btn"
                 phx-click="review"
                 phx-value-id={g["id"]}
+                phx-value-revision={g["revision"]}
                 phx-value-status="locally_acknowledged"
                 phx-disable-with="Saving…"
               >Acknowledge locally</button><button
                 class="btn btn-quiet"
                 phx-click="review"
                 phx-value-id={g["id"]}
+                phx-value-revision={g["revision"]}
                 phx-value-status="closed_by_reviewer"
                 phx-disable-with="Saving…"
               >Close by review</button>
@@ -634,7 +837,41 @@ defmodule OpsBrainWeb.OperationsLive do
         </div><div class="panel-body">
           <p class="muted tiny">
             Up to 20 occurrence samples, 5 correlation/recovery records, 50 revisions and 20 local notifications. Counts are not full-history totals. Evidence closes on refresh to avoid stale snapshots.
-          </p><h4>Local notification state</h4><p
+          </p>
+          <section id="issue-audit-history" aria-labelledby="issue-audit-title">
+            <h4 id="issue-audit-title">Local operator history</h4>
+            <p class="muted tiny">
+              Latest 50 successful actions; conflicts and rejected requests make no state change. History is retained with this finding, not reconstructed for earlier actions.
+            </p>
+            <p :if={@selected_evidence.audit_count == 0} id="audit-empty">
+              No recorded local actions.
+            </p>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Applied</th><th>Operator</th><th>Action</th><th>Revision</th><th>
+                      Local values
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="issue-audit-events" phx-update="stream">
+                  <tr :for={{dom_id, event} <- @streams.audit_events} id={dom_id}>
+                    <td>{UI.timestamp(event["inserted_at"])}</td>
+                    <td>{event["actor_name"]}<small class="mono">{event["actor_id"]}</small></td>
+                    <td>{UI.humanize(event["action"])}</td>
+                    <td>{event["before_revision"]} → {event["after_revision"]}</td>
+                    <td>
+                      <details>
+                        <summary>Before / after</summary><pre>{Jason.encode!(%{before: event["before_state"], after: event["after_state"]}, pretty: true)}</pre>
+                      </details>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <h4>Local notification state</h4><p
             :if={@selected_evidence.notifications == []}
             class="muted tiny"
           >

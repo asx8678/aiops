@@ -99,6 +99,15 @@ defmodule OpsBrain.Fixtures do
     Accounts.issue_token(operator.id, "login", expires_at)
   end
 
+  # Only for adapting non-concurrency tests. Conflict tests retain the original
+  # observed revision explicitly rather than fetching it again before a write.
+  def issue_revision(scope, id) do
+    {:ok, groups} = OpsBrain.Issues.list(scope)
+
+    Enum.find_value(groups, fn g -> if g["id"] == id, do: g["revision"] end) ||
+      raise "Fixture issue is not visible in the bounded authorized list"
+  end
+
   def connection_id do
     %{rows: [[id]]} = Repo.query!("SELECT pg_backend_pid()")
     id

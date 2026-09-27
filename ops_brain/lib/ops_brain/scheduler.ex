@@ -10,7 +10,23 @@ defmodule OpsBrain.Scheduler do
     if Application.get_env(:ops_brain, :maintenance_enabled, false),
       do: Process.send_after(self(), {:maintenance, 0}, 5_000)
 
+    if Application.get_env(:ops_brain, :prediction_enabled) == true,
+      do: Process.send_after(self(), :prediction, 5_000)
+
     {:ok, 0}
+  end
+
+  # Opt-in prediction persistence: one pass every 5 minutes while enabled.
+  # Disabled stops rescheduling entirely (fail closed, like maintenance).
+  def prediction_interval, do: 300_000
+
+  def handle_info(:prediction, state) do
+    if Application.get_env(:ops_brain, :prediction_enabled) == true do
+      Oban.insert(OpsBrain.PredictionWorker.new(%{}))
+      Process.send_after(self(), :prediction, prediction_interval())
+    end
+
+    {:noreply, state}
   end
 
   def handle_info({:maintenance, offset}, state) do

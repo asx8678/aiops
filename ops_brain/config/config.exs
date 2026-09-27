@@ -46,6 +46,7 @@ config :ops_brain,
   maintenance_enabled: false,
   collection_enabled: false,
   delivery_enabled: false,
+  prediction_enabled: false,
   metrics_console: false,
   sources: %{},
   notification_sinks: %{}

@@ -7,7 +7,10 @@ defmodule OpsBrain.Redactor do
   # conservatively to the end of the input; a leaked tail is worse than
   # over-redacting malformed input. Unquoted values stop at whitespace or a
   # delimiter and never absorb a quote character.
-  @assignment ~r/(?i)\b(password|passwd|secret|token|api[_-]?key|sig)\s*[=:]\s*("(?:[^"\\]|\\[\s\S])*+(?:"|\\?\z)|'(?:[^'\\]|\\[\s\S])*+(?:'|\\?\z)|[^\s&,;"']+)/
+  # OAuth names use the same vocabulary in JSON and assignment-style logs.
+  @sensitive_key ~S"(?:password|passwd|secret|token|api[_-]?key|sig|(?:access|refresh|id)[_-]?token|client[_-]?secret)"
+  @json_secret ~r/(?i)("(?:#{@sensitive_key}|authorization)"\s*:\s*)"(?:[^"\\]|\\[\s\S])*+(?:"|\\?\z)/
+  @assignment ~r/(?i)\b(#{@sensitive_key})\s*[=:]\s*("(?:[^"\\]|\\[\s\S])*+(?:"|\\?\z)|'(?:[^'\\]|\\[\s\S])*+(?:'|\\?\z)|[^\s&,;"']+)/
   @max_input_bytes 1_048_576
 
   def clean(text, max_bytes \\ 4000)
@@ -29,7 +32,7 @@ defmodule OpsBrain.Redactor do
     text
     |> String.replace(~r/\e\[[0-9;]*[a-zA-Z]/, "")
     |> String.replace(
-      ~r/(?i)("(?:password|passwd|secret|token|api[_-]?key|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"/,
+      @json_secret,
       "\\1\"[REDACTED]\""
     )
     |> String.replace(

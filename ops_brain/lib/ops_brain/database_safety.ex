@@ -10,7 +10,7 @@ defmodule OpsBrain.DatabaseSafety do
     sources environments collection_states pipeline_runs run_snapshots
     evidence_items error_fingerprints issue_groups failure_occurrences
     service_instances observation_windows source_budgets notification_outbox
-    observation_revisions kubernetes_cursors occurrence_evidence
+    observation_revisions kubernetes_cursors occurrence_evidence issue_audit_events
   )
 
   def protected_tables, do: @protected_tables
@@ -40,6 +40,17 @@ defmodule OpsBrain.DatabaseSafety do
 
     if unsafe_role or protected != length(@protected_tables) do
       raise "Unsafe runtime database role or missing RLS migration. Use a non-owner, non-BYPASSRLS role."
+    end
+
+    %{rows: [[can_append, can_modify]]} =
+      Repo.query!("""
+      SELECT has_table_privilege(current_user, 'issue_audit_events', 'SELECT')
+         AND has_table_privilege(current_user, 'issue_audit_events', 'INSERT'),
+         has_table_privilege(current_user, 'issue_audit_events', 'UPDATE,DELETE,TRUNCATE')
+      """)
+
+    if not can_append or can_modify do
+      raise "Unsafe audit history privileges. Apply reviewed SELECT/INSERT-only runtime grants."
     end
 
     :ok

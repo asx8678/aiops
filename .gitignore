@@ -1,5 +1,6 @@
 .DS_Store
 .pi/
+.jev-fabric-native/
 
 # Python bytecode from release contract checks.
 __pycache__/

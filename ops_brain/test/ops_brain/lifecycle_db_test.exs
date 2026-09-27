@@ -83,7 +83,11 @@ defmodule OpsBrain.LifecycleDbTest do
   test "a reviewed closure is not silently reopened or joined", f do
     base = DateTime.add(f.now, -2 * 3600)
     group = record(f, f.c, "closed-1", base, "warning")
-    assert {:ok, _} = Issues.review(f.scope_a, group, "closed_by_reviewer")
+
+    assert {:ok, _} =
+             Issues.review(f.scope_a, group, "closed_by_reviewer",
+               expected_revision: issue_revision(f.scope_a, group)
+             )
 
     new_group = record(f, f.c, "closed-2", DateTime.add(base, 300), "warning")
     refute new_group == group
@@ -100,8 +104,17 @@ defmodule OpsBrain.LifecycleDbTest do
 
   test "duplicate critical and escalation preserve acknowledgment and assignment", f do
     group = record(f, f.c, "human-warning", f.now, "warning")
-    assert {:ok, _} = Issues.assign(f.scope_a, group, "synthetic-owner")
-    assert {:ok, _} = Issues.review(f.scope_a, group, "locally_acknowledged")
+
+    assert {:ok, _} =
+             Issues.assign(f.scope_a, group, "synthetic-owner",
+               expected_revision: issue_revision(f.scope_a, group)
+             )
+
+    assert {:ok, _} =
+             Issues.review(f.scope_a, group, "locally_acknowledged",
+               expected_revision: issue_revision(f.scope_a, group)
+             )
+
     assert group == record(f, f.c, "human-critical", f.now, "critical")
     record(f, f.c, "human-critical", f.now, "critical")
     row = read(f, f.c, group)
@@ -115,12 +128,23 @@ defmodule OpsBrain.LifecycleDbTest do
     group = record(f, f.c, "owner-1", f.now, "warning")
 
     assert {:ok, %{"owner" => "synthetic-owner"}} =
-             Issues.assign(f.scope_a, group, "synthetic-owner")
+             Issues.assign(f.scope_a, group, "synthetic-owner",
+               expected_revision: issue_revision(f.scope_a, group)
+             )
 
     assert {:ok, %{"owner" => "synthetic-owner", "status" => "locally_acknowledged"}} =
-             Issues.review(f.scope_a, group, "locally_acknowledged")
+             Issues.review(f.scope_a, group, "locally_acknowledged",
+               expected_revision: issue_revision(f.scope_a, group)
+             )
 
-    assert {:ok, %{"owner" => nil}} = Issues.unassign(f.scope_a, group)
-    assert {:error, :invalid_owner} = Issues.assign(f.scope_a, group, nil)
+    assert {:ok, %{"owner" => nil}} =
+             Issues.unassign(f.scope_a, group,
+               expected_revision: issue_revision(f.scope_a, group)
+             )
+
+    assert {:error, :invalid_owner} =
+             Issues.assign(f.scope_a, group, nil,
+               expected_revision: issue_revision(f.scope_a, group)
+             )
   end
 end

@@ -60,6 +60,7 @@ defmodule OpsBrain.SourceFixtures do
     for key <- [
           :sources,
           :collection_enabled,
+          :prediction_enabled,
           :clock,
           :http_plug,
           :notification_sinks,

@@ -19,6 +19,10 @@ defmodule OpsBrainWeb.UI do
 
   def areas do
     [
+      {:command, "Command center", "/command", "hero-bolt",
+       "What is broken, what is about to break, and blind spots"},
+      {:troubleshoot, "Troubleshoot", "/troubleshoot", "hero-wrench-screwdriver",
+       "Everything about one service on one page"},
       {:show, "Configuration", "", "hero-squares-2x2",
        "Environment identities and source configuration"},
       {:pipelines, "Pipelines", "/pipelines", "hero-command-line",
@@ -34,7 +38,11 @@ defmodule OpsBrainWeb.UI do
     ]
   end
 
-  def area(action), do: Enum.find(areas(), &(elem(&1, 0) == action)) || hd(areas())
+  def area(action),
+    do:
+      Enum.find(areas(), &(elem(&1, 0) == action)) ||
+        Enum.find(areas(), &(elem(&1, 0) == :show))
+
   def title(action), do: elem(area(action), 1)
   def description(action), do: elem(area(action), 4)
 
@@ -138,7 +146,21 @@ defmodule OpsBrainWeb.UI do
     ]
   end
 
-  def summaries(action, {services, windows}) when action in [:services, :capacity] do
+  def summaries(:capacity, {services, forecasts}) do
+    [
+      {"Mapped targets", length(services), "Up to 100 · identities, not healthy services",
+       "hero-server-stack"},
+      {"Capacity evaluations", length(forecasts), "Up to 100 unexpired records · before search",
+       "hero-chart-bar"},
+      {"Warning / critical",
+       Enum.count(forecasts, &(&1["result"]["condition"] in ["warning", "critical"])),
+       "Stored capacity results · not current incidents", "hero-exclamation-circle"},
+      {"Unknown condition", Enum.count(forecasts, &(&1["result"]["condition"] == "unknown")),
+       "Missing prerequisites · not normal", "hero-magnifying-glass"}
+    ]
+  end
+
+  def summaries(:services, {services, windows}) do
     [
       {"Mapped targets", length(services), "Up to 100 · identities, not healthy services",
        "hero-server-stack"},

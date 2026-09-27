@@ -114,8 +114,16 @@ defmodule OpsBrain.EvidenceRevisionTest do
        f do
     assert {:ok, _} = fail_run(f, %{})
     first = occurrence(f)
-    assert {:ok, _} = Issues.assign(f.scope_a, first["group_id"], "reviewer")
-    assert {:ok, _} = Issues.review(f.scope_a, first["group_id"], "closed_by_reviewer")
+
+    assert {:ok, _} =
+             Issues.assign(f.scope_a, first["group_id"], "reviewer",
+               expected_revision: issue_revision(f.scope_a, first["group_id"])
+             )
+
+    assert {:ok, _} =
+             Issues.review(f.scope_a, first["group_id"], "closed_by_reviewer",
+               expected_revision: issue_revision(f.scope_a, first["group_id"])
+             )
 
     {:ok, new_group} =
       SourceConfig.transaction(f.c.id, fn c ->

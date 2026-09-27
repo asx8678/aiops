@@ -11,7 +11,7 @@ defmodule OpsBrain.PreparationTest do
   test "prepared config validates disabled but untouched activation fails closed" do
     path = Path.expand("config/sources.prepared.json")
     cfg = Configuration.read!(path)
-    assert map_size(cfg.sources) == 4
+    assert map_size(cfg.sources) == 5
     refute cfg.collection_enabled
     refute cfg.delivery_enabled
     assert Enum.all?(cfg.sources, fn {_, s} -> s.enabled == false end)

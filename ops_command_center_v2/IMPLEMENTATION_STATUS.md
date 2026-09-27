@@ -4,6 +4,14 @@ Updated 2026-09-19 after the credential-free completion pass. The user authorize
 
 **Local implementation/preparation is delivered; production acceptance is not.** Credentials are not required for the implemented code/tests, but approved installation details, live contracts, deployment/security validation and second-real-company onboarding remain required. No source was connected, external notification sent, cloud resource provisioned or production deployment performed. Configuration placeholders are intentionally disabled and rejected if enabled unchanged.
 
+## Latest scoped follow-up — R08 (2026-09-26)
+
+Local assignment/unassignment, lifecycle review and snooze now require the displayed revision and atomically append company-scoped, redacted operator history. Stale actions conflict without overwriting state; the UI refreshes for an explicit retry and displays the latest 50 audit events. Runtime cannot directly update/delete/truncate history; deliberate parent retention still cascades.
+
+**Latest local verification: 263 tests passed**, including 14 new R08 database/LiveView regressions, a real two-connection race, lock-wait membership revocation and audit-write rollback. Production warnings-as-errors compilation, migration down/re-up, missing-schema refusal, both runtime-grant paths and public API probes passed. Earlier totals below remain historical checkpoints, not the current suite total.
+
+Plan, exact contracts, rollout/rollback and evidence: [`../ops_brain/docs/R08_REVIEW_AUDIT.md`](../ops_brain/docs/R08_REVIEW_AUDIT.md). New migration/grants require approved rollout. No historical audit backfill, production migration or deployment occurred. R02/R03 fairness/backlog work, broader R23 whole-node crash/load gates, release/CI hardening and external acceptance remain separate.
+
 ## Current task ledger
 
 | Task | Delivered code/evidence | Remaining external gate or explicit scope limit |

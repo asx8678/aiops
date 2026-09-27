@@ -92,6 +92,36 @@ defmodule OpsBrain.RedactorTest do
     assert Redactor.clean("\e[31mHTTP 403\e[0m") == "HTTP 403"
   end
 
+  test "OAuth credential fields and assignments share one case-insensitive key vocabulary" do
+    for key <-
+          ~w(access_token refresh_token id_token client_secret ACCESS_TOKEN RefreshToken id-token clientSecret) do
+      value = "CANARY_OAUTH escaped\" quote, multiline\ntail"
+      json = Jason.encode!(%{"nested" => [%{key => value}], "status" => "failed"})
+      clean = Redactor.clean(json)
+      refute clean =~ "CANARY_OAUTH"
+      assert Jason.decode!(clean)["nested"] == [%{key => "[REDACTED]"}]
+      assert Jason.decode!(clean)["status"] == "failed"
+      assert Redactor.clean(clean) == clean
+
+      for quote <- ["\"", "'"], delimiter <- ["=", ":"] do
+        input = key <> delimiter <> quote <> "CANARY_ASSIGN alpha beta" <> quote
+        refute Redactor.clean(input) =~ "CANARY_ASSIGN"
+        assert Redactor.clean(input) =~ "[REDACTED]"
+      end
+    end
+  end
+
+  test "truncated JSON credential strings consume dangling escapes and multiline tails" do
+    for key <- ~w(token password access_token refresh_token client_secret authorization),
+        tail <- ["", "\\", "\\\nCANARY_AFTER_NEWLINE", "\nCANARY_AFTER_NEWLINE"] do
+      input = "{\"" <> key <> "\":\"CANARY_JSON_TAIL " <> tail
+      clean = Redactor.clean(input)
+      refute clean =~ "CANARY_"
+      assert clean =~ "[REDACTED]"
+      assert Redactor.clean(clean) == clean
+    end
+  end
+
   test "an unterminated quoted value cannot leak into later fields of the same line" do
     clean = Redactor.clean(~s(password="CANARY_TAIL then unrelated=ok))
     refute clean =~ "CANARY_TAIL"

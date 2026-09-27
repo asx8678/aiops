@@ -16,24 +16,19 @@ defmodule OpsBrainWeb.WorkspaceHomeTest do
     Map.put(f, :conn, init_test_session(build_conn(), operator_token: f.token_a))
   end
 
-  test "an explicit workspace wins over other memberships without a chooser", f do
+  test "an explicit workspace lands on the command center without a chooser", f do
     Demo.seed!(TestAdminRepo, f.alice.name)
     Application.put_env(:ops_brain, :workspace_company_id, Demo.company_id())
-    {:ok, view, _} = live(f.conn, "/")
-    assert has_element?(view, "#home-workspace[data-company-id='#{Demo.company_id()}']")
-    assert has_element?(view, "#home-stats", "210")
-    assert has_element?(view, "#home-stats", "48")
-    assert has_element?(view, "#demo-banner", "SYNTHETIC DEMO")
-    assert has_element?(view, "#home-explore[href='/companies/#{Demo.company_id()}/demo']")
 
-    assert has_element?(
-             view,
-             "#home-investigate[href='/companies/#{Demo.company_id()}/investigations']"
-           )
+    # the resolved workspace goes straight to the command center
+    command = "/companies/#{Demo.company_id()}/command"
+    assert {:error, {:redirect, %{to: ^command}}} = live(f.conn, "/")
 
+    # the destination is the operator's authorized demo workspace, never a chooser
+    {:ok, view, _} = live(f.conn, "/companies/#{Demo.company_id()}/command")
     refute has_element?(view, "#companies, #company-search, a.workspace-switch")
-    for env <- ~w(dev staging prod), do: assert(has_element?(view, "#home-environment-#{env}"))
-    refute has_element?(view, "#home-environments .badge-success")
+    assert has_element?(view, "#demo-banner", "SYNTHETIC DEMO")
+
     {:ok, home} = Workspace.resolve(f.token_a)
     assert home.company_id == Demo.company_id()
     {:ok, snapshot} = Demo.summary(home)
@@ -66,20 +61,32 @@ defmodule OpsBrainWeb.WorkspaceHomeTest do
     assert has_element?(view, "#workspace-unavailable")
   end
 
-  test "home ignores forged company parameters and rechecks revocation", f do
+  test "the landing rechecks revocation and ignores forged company parameters", f do
     Application.put_env(:ops_brain, :workspace_company_id, f.a.id)
-    {:ok, view, _} = live(f.conn, "/")
-    render_click(view, "refresh", %{"company_id" => f.b.id})
-    assert has_element?(view, "#home-workspace[data-company-id='#{f.a.id}']")
 
+    # the resolved workspace goes straight to the command center; the landing
+    # URL carries no company parameter to forge
+    command = "/companies/#{f.a.id}/command"
+    assert {:error, {:redirect, %{to: ^command}}} = live(f.conn, "/")
+
+    # with membership revoked, the destination itself rejects at mount
     TestAdminRepo.query!(
       "DELETE FROM memberships WHERE operator_id=$1::text::uuid AND company_id=$2::text::uuid",
       [f.alice.id, f.a.id]
     )
 
-    render_click(view, "refresh", %{})
-    assert_redirect(view, "/sign-in")
-    assert {:error, :unauthorized} = Workspace.resolve(f.token_a)
+    assert {:error, {:redirect, %{to: "/sign-in"}}} = live(f.conn, command)
+
+    # the landing then shows the workspace-error state, never a selector or
+    # another company's data — and a forged company parameter changes nothing
+    {:ok, view, html} = live(f.conn, "/")
+    assert has_element?(view, "#workspace-unavailable")
+    refute has_element?(view, "#companies, #company-search, a.workspace-switch")
+    refute html =~ f.b.name
+
+    render_click(view, "refresh", %{"company_id" => f.b.id})
+    assert has_element?(view, "#workspace-unavailable")
+
     Accounts.revoke_session(f.token_a)
     assert {:error, {:redirect, %{to: "/sign-in"}}} = live(f.conn, "/")
   end
@@ -121,7 +128,9 @@ defmodule OpsBrainWeb.WorkspaceHomeTest do
 
   test "the same monochrome vector is shared across surfaces and supplied in black and white",
        f do
-    {:ok, view, _} = live(f.conn, "/")
+    # the landing renders its full frame only for the workspace-error state
+    conn = init_test_session(build_conn(), operator_token: f.token_dual)
+    {:ok, view, _} = live(conn, "/")
     assert has_element?(view, ".sidebar .brand .constellation-logo svg path[stroke=currentColor]")
     assert has_element?(view, ".intro-art .constellation-logo svg g[fill=currentColor]")
     refute has_element?(view, ".sidebar .brand .hero-square-3-stack-3d")

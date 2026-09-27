@@ -45,6 +45,7 @@ defmodule OpsBrain.Evaluations do
         "detector" => "storage_headroom",
         "version" => 1,
         "profile" => key,
+        "service_id" => c.service_id,
         "policy_version" => Map.get(policy, :version, 1),
         "result" => result,
         "input_window_ids" => Enum.map(rows, & &1["id"]),

@@ -48,10 +48,16 @@ defmodule OpsBrain.OperationsTest do
     assert group["occurrences"] == 3 and group["distinct_runs"] == 2
     assert {:ok, [_, _, _]} = Issues.evidence(f.scope_a, group["id"])
     assert {:ok, []} = Issues.evidence(f.scope_b, group["id"])
-    assert {:ok, nil} = Issues.review(f.scope_b, group["id"], "locally_acknowledged")
+
+    assert {:ok, nil} =
+             Issues.review(f.scope_b, group["id"], "locally_acknowledged",
+               expected_revision: issue_revision(f.scope_a, group["id"])
+             )
 
     assert {:ok, %{"status" => "locally_acknowledged"}} =
-             Issues.review(f.scope_a, group["id"], "locally_acknowledged")
+             Issues.review(f.scope_a, group["id"], "locally_acknowledged",
+               expected_revision: issue_revision(f.scope_a, group["id"])
+             )
 
     assert {:ok, _} = failure(f.c, "run3:task1:1", 3, DateTime.add(f.now, 30))
     assert {:ok, [%{"status" => "locally_acknowledged"}]} = Issues.list(f.scope_a)
@@ -304,7 +310,11 @@ defmodule OpsBrain.OperationsTest do
        f do
     failure(f.c, "one", 1, f.now)
     {:ok, [g]} = Issues.list(f.scope_a)
-    Issues.review(f.scope_a, g["id"], "locally_acknowledged")
+
+    Issues.review(f.scope_a, g["id"], "locally_acknowledged",
+      expected_revision: issue_revision(f.scope_a, g["id"])
+    )
+
     Application.put_env(:ops_brain, :http_plug, fn _ -> raise "replay performed network" end)
     Application.put_env(:ops_brain, :notification_plug, fn _ -> raise "replay delivered" end)
     assert {:ok, [_]} = Replay.fingerprints(f.scope_a, DateTime.add(f.now, 1))
